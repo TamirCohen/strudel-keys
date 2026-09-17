@@ -7,11 +7,11 @@ async function readLimited(stream){
 }
 export async function shareURL(project,base){
  const bytes=new TextEncoder().encode(JSON.stringify(restoreProject(project)));
- if(bytes.length>MAX_BYTES)throw Error('Project is too large for a share link. Use Save instead.');
+ if(bytes.length>MAX_BYTES)throw Error('Project is too large for a share link. Shorten the project or copy its code from Project Strudel.');
  const compressed=await readLimited(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip')));
  let binary='';for(const byte of compressed)binary+=String.fromCharCode(byte);
  const url=new URL(base);url.search='';url.hash='project=v1.'+btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
- if(url.href.length>MAX_URL)throw Error('Project is too large for a share link. Use Save instead.');
+ if(url.href.length>MAX_URL)throw Error('Project is too large for a share link. Shorten the project or copy its code from Project Strudel.');
  return url.href;
 }
 export async function projectFromHash(hash){

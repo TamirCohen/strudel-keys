@@ -23,7 +23,7 @@ const track=()=>project.tracks.find(t=>t.id===selected);
 const beats=()=>project.bars*4;
 const currentNotes=()=>views.get(selected)||[];
 const options=()=>({metronome:$('metro').checked,only});
-try{const saved=localStorage.getItem('keylab-project');if(saved)project=restoreProject(JSON.parse(saved));selected=project.tracks[0]?.id;}catch{status('Could not restore the saved project. Open a saved file to recover it.');}
+try{const saved=localStorage.getItem('keylab-project');if(saved)project=restoreProject(JSON.parse(saved));selected=project.tracks[0]?.id;}catch{status('Could not restore the saved project. Open a share link to recover it.');}
 function persist(){localStorage.setItem(sharedSession?'keylab-shared-project':'keylab-project',JSON.stringify(project));}
 function saveUndo(value=JSON.stringify(project)){history.push(value);if(history.length>80)history.shift();$('undo').disabled=false;}
 function mapping(){
@@ -63,7 +63,7 @@ function render(){
  $('play').textContent=running?'■ Stop music':'▶ Play music';$('play').setAttribute('aria-label',running?'Stop music':'Play music');
  $('play-hint').textContent=running?(only?'Playing selected track':'Playing all tracks'):(sharedPending?'Shared project loaded. Press Play music to start.':'Press Play music to hear your tracks.');
  $('share').disabled=busy||recording;
- for(const id of ['bpm','bars','add-track','load'])$(id).disabled=busy||recording;
+ for(const id of ['bpm','bars','add-track'])$(id).disabled=busy||recording;
  if(t){
   $('editor-title').textContent=t.name;$('sound').value=t.instrument;$('volume').value=trackVolume(t);
   $('octave').textContent=octave;$('octave-control').style.display=isDrum(t.instrument)?'none':'flex';
@@ -340,7 +340,6 @@ $('lanes').oncontextmenu=e=>{const el=e.target.closest('[data-note]');if(!el)ret
 $('view-all').onclick=()=>{const open=$('overview').hidden;$('overview').hidden=!open;$('view-all').setAttribute('aria-pressed',String(open));renderOverview();};
 $('arrangement').onclick=e=>{const el=e.target.closest('[data-arrange]');if(el&&!recording){selected=el.dataset.arrange;selection=null;render();}};
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText(projectCode(project));status('Project code copied.');}catch{$('code').focus();$('code').select();}};
-$('save').onclick=()=>{const blob=new Blob([JSON.stringify(project,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='live-strudel.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
 $('share').onclick=async()=>{
  if(drafts.size){status('Run your code changes before sharing.');return;}
  try{const url=await shareURL(project,location.href);$('share-url').value=url;$('share-dialog').showModal();$('share-url').select();
@@ -348,11 +347,6 @@ $('share').onclick=async()=>{
  }catch(e){status(e.message);}
 };
 $('copy-share').onclick=async()=>{try{await navigator.clipboard.writeText($('share-url').value);$('share-feedback').textContent='Link copied.';}catch{$('share-url').focus();$('share-url').select();$('share-feedback').textContent='Press ⌘C / Ctrl+C to copy.';}};
-$('load').onclick=()=>$('file').click();
-$('file').onchange=e=>transaction(async()=>{
- const file=e.target.files[0];if(!file)return;if(file.size>10*1024*1024)throw Error('Project file exceeds 10 MB.');
- const next=restoreProject(JSON.parse(await file.text()));await stop();await live.prepare(next);saveUndo();project=next;selected=project.tracks[0]?.id;drafts.clear();refreshViews();persist();e.target.value='';
-});
 document.addEventListener('strudel.log',e=>{if(e.detail?.message?.includes('error:'))status(e.detail.message);});
 async function bootstrap(){
  busy=true;render();

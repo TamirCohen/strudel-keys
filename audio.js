@@ -1,8 +1,8 @@
 import {isDrum} from './core.js';
 export class AudioEngine {
   context=null; buffers=new Map(); voices=new Set(); loading=null;
-  async init(manifest) {
-    if(!this.context){this.context=new AudioContext({latencyHint:'interactive'});this.master=this.context.createGain();this.master.gain.value=.65;const limiter=this.context.createDynamicsCompressor();limiter.threshold.value=-6;limiter.ratio.value=12;this.master.connect(limiter).connect(this.context.destination);}
+  async init(manifest,context) {
+    if(!this.master){this.context=context||new AudioContext({latencyHint:'interactive'});this.master=this.context.createGain();this.master.gain.value=.65;const limiter=this.context.createDynamicsCompressor();limiter.threshold.value=-6;limiter.ratio.value=12;this.master.connect(limiter).connect(this.context.destination);}
     await this.context.resume();
     if(!this.loading) this.loading=Promise.all(Object.entries(manifest).flatMap(([bank,items])=>Object.entries(items).map(async([pitch,url])=>{const key=bank+':'+pitch;if(this.buffers.has(key))return;const r=await fetch(url);if(!r.ok)throw Error('Could not load drum samples. Check your connection and retry.');const buffer=await this.context.decodeAudioData(await r.arrayBuffer());this.buffers.set(key,buffer);}))).catch(e=>{this.loading=null;throw e;});
     await this.loading;

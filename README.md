@@ -1,55 +1,47 @@
-# Keylab
+# Live Strudel
 
-A frontend-only QWERTY music recorder for TamirCohen. Play drum kits and synthesizers, record layered loops, edit MIDI-style note lanes, quantize timing, and copy a playable Strudel pattern.
+A browser-based Strudel workspace with live code, recording, a piano roll, and a colored all-tracks timeline.
 
 ## Run locally
 
-Requires Node.js 22 or newer.
+Requires Node.js 22.15 or newer. Run `npm ci`, then `npm run dev` and open the printed local URL. Click **Audio** to enable playback. Drum samples require internet access. Projects autosave in this browser; **Save** downloads a portable JSON backup.
 
-```sh
-npm ci
-npm run dev
-```
+## One musical source
 
-Open the printed URL **on the same machine**, or forward port 5173 when working remotely. Click **Enable audio** to preload both drum kits. Sample loading needs internet access. No backend or sign-in is used. Projects autosave in this browser; use **Save project** for a portable JSON file.
+Every track stores Strudel code—not a second editable note array or an edit log. For supported repeating patterns, adding, moving, resizing, deleting, quantizing, or recording rewrites the current notes as compact native mini-notation. Shared sounds, banks, effects, and volume are factored out once. No UUIDs, JSON payloads, or accumulating filter callbacks appear in generated code. Undo history stays outside Strudel.
 
-## Playing and recording
+Use **Simplify** beside Run track to clean up older generated edit wrappers. It preserves the current audible notes and effects, including genuine added notes; it does not guess that additions should be deleted. Simplification can be undone. The app recompiles generated code and checks the resulting notes and controls before applying it.
 
-- Drums: **A S D F G H J K** = kick, snare, closed hat, open hat, clap, low tom, high tom, crash.
-- Synth: **A W S E D F T G Y H U J K** plays a chromatic octave. Hold keys to sustain; play multiple keys for chords. **Z / X** lower or raise the octave.
-- **Space** starts/stops playback when focus is outside a form control. **Shift+R** starts/stops recording. Recording uses a one-bar count-in by default and overdubs the selected track on each loop.
-- Add a track to layer a synth or another drum kit over your existing recording. Stop before selecting another track. Sound changes between drums and synths create a new track if the current one contains notes.
-- Click a note lane to add a note. Drag notes to move, **Alt+drag** synth notes to resize, right-click or use Delete/Backspace on a focused note to remove.
-- Quantize affects only the selected track. Choose 1/4, 1/8, 1/16, 1/32 or eighth-note triplets. Undo restores original timing. Quantization wraps a hit near the loop end to the first beat.
-- Mute and solo apply to playback and Strudel export.
-- Copy the generated code into https://strudel.cc/ and run it. Export preserves timing and note durations with `timecat`, `slow`, and `late`; it also preserves overlapping notes and notes crossing a loop boundary. Drum tails play naturally.
+Playback, metronome, count-in, recording timestamps, and playheads use the same Strudel scheduler. Project tempo is stored as `setcpm(...)`; a tempo command applied from a track updates that shared tempo. One cycle is four beats. The loop selector controls the editor/recording span; it does not truncate arbitrary live-code patterns.
 
-## Sounds
+Each track has its own code scope. For example, `$: s("bd*4, [~ cp]*2").bank("RolandTR909")`, or `$: note("c3 e3 g3 b3").s("sawtooth").lpf(1200).room(.2)`. **Run track** applies code and auditions it when stopped. **Play** starts the full mix. Cmd/Ctrl+Enter runs the selected code.
 
-Drums use pinned sample URLs from [tidal-drum-machines](https://github.com/geikha/tidal-drum-machines), the collection used by Strudel. The TR-909 kit uses RolandTR909 samples; the acoustic-style kit uses Boss DR-660 Real samples plus its clap and crash. Samples stream from the upstream repository; they are not redistributed in the build. See `public/credits.html`.
+The per-track volume sliders write a `postgain(...)` transform into Strudel. Mute and Solo select which track patterns enter the mix and export. **All tracks** shows colored, stacked timelines; click one to select its editor.
 
-The Web Audio synths provide sawtooth, three-voice supersaw, sine, square and triangle. Exported synth tones can differ in envelope and processing from the local instrument. Input timing depends on the browser, audio hardware and keyboard rollover; this is not hardware MIDI recording. Held notes are limited to one loop length. Switching tabs stops the transport to avoid background timer throttling.
+## Editing and recording
 
-## GitHub Pages — personal account only
+- **Add track** opens a sound picker. Mute, Solo, and Delete use full labels.
+- Click an empty note lane to add a note; drag to move; drag its right-edge handle to make a pitched note longer or shorter (Alt-drag also works).
+- Select a note and use **Delete note**, Delete, Backspace, or right-click. **Clear** clears the selected track; **Remove all** removes every track.
+- Cmd/Ctrl+Z undoes project edits and recorded takes. In the code textarea it uses normal text undo; the Undo button always acts on the project.
+- Drum keys: A S D F G H J K. Synth keys: A W S E D F T G Y H U J K. Z/X changes octave. Physical key positions work across keyboard languages.
+- Space starts/stops playback outside form fields. Shift+R records. Count-in is one bar when enabled. Hold synth keys for sustained notes; recording overdubs the selected track.
+- Quantize uses the selected grid. The original code remains available through undo. Time-varying patterns refresh their projected notes as playback advances.
 
-The repository is **TamirCohen/strudel-keys**, private and owned by the personal account. Nothing should be created or pushed using the work account. The local repository's SSH command selects only the dedicated personal key and disables SSH-agent identities. Its pre-push hook verifies the remote and authenticated GitHub username before allowing a push. The Pages workflow is restricted to owner `TamirCohen`.
+Project export includes native Strudel banks and synths, isolated track transforms, and the shared tempo. Included sample maps are RolandTR909 and BossDR660, plus Roland/tr909 aliases. Additional sample collections can be loaded with `samples()`. This is the actual Strudel runtime, not every sample collection preloaded on strudel.cc. Code executes JavaScript in this page: only run code you trust.
 
-1. While logged in as **TamirCohen**, add `/home/ubuntu/.ssh/id_ed25519_tamircohen_keylab.pub` at https://github.com/settings/ssh/new. This key was generated on the remote development machine, not your laptop. Never upload the private key.
-2. Create an empty private repository named **strudel-keys** at https://github.com/new, owned by **TamirCohen**. SSH keys authorize Git pushes but cannot create repositories or configure Pages through GitHub's API.
-3. Push this local repository to its configured personal remote: `git push -u origin main`.
-4. In that repository's Settings → Pages, choose **GitHub Actions** as the source. Run/re-run the **Deploy Keylab to GitHub Pages** workflow if necessary.
+## Sounds and limitations
 
-The expected address after successful deployment is https://tamircohen.github.io/strudel-keys/ . It is not live until the workflow succeeds.
+Drum samples stream from the pinned tidal-drum-machines URLs listed in `public/samples.json`; see `public/credits.html`. Immediate keyboard monitoring uses the shared AudioContext with a lightweight instrument preview; its synth envelope may differ from a track's Strudel effects. Playback itself runs the Strudel pattern.
+
+Note rewriting supports a conservative subset of static native patterns and controls. Randomness, alternation, custom callbacks, unknown effects, and patterns whose repeat exceeds the editor span remain playable/editable as code, but visual rewrites and recording into them are rejected with an explanation. They are never silently flattened into a loop. Exact off-grid recordings may need readable timecat/slow/late expressions rather than mini-notation. Input latency depends on browser, hardware, and keyboard rollover. Held recordings are capped to the editor span. Switching tabs stops transport.
 
 ## Checks
 
-```sh
-npm test
-npm run build
-npx playwright install --with-deps chromium
-npm run dev
-# In another terminal:
-node tests/browser.mjs
-```
+Run `npm test` and `npm run build`. For browser regression tests, install Chromium with `npx playwright install chromium`, leave the dev server running, then run `node tests/browser.mjs`.
 
-Unit tests cover quantization, import validation, track audibility, and generated patterns queried through Strudel's actual pattern engine. The browser smoke test covers remote sample decoding, recording, held chords, playback, quantization/undo, persistence, export, a feature-detected read-only WebMCP tool and narrow-screen layout. The production app has no JavaScript runtime dependencies. Strudel is a dev-only dependency used to validate exports.
+Tests cover canonical state and legacy migration, repeated-pattern export, note/effect editing, undo, recording, non-English keyboard input, volume/code synchronization, shared metronome timing, clap identity during playback, persistence, and narrow-screen layout.
+
+## Personal GitHub
+
+The configured repository is **TamirCohen/strudel-keys**. Use the dedicated personal SSH identity configured in this repository; do not use a work-account identity. The existing GitHub Actions workflow handles Pages deployment when changes are pushed. Local development does not publish automatically.

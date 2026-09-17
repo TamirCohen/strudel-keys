@@ -32,10 +32,10 @@ The Web Audio synths provide sawtooth, three-voice supersaw, sine, square and tr
 
 ## GitHub Pages — personal account only
 
-The intended repository is **TamirCohen/strudel-keys**. Nothing should be created or pushed using the work account. The local repository's SSH command selects only the dedicated personal key and disables SSH-agent identities. Its pre-push hook verifies the remote and authenticated GitHub username before allowing a push. The Pages workflow is restricted to owner `TamirCohen`.
+The repository is **TamirCohen/strudel-keys**, private and owned by the personal account. Nothing should be created or pushed using the work account. The local repository's SSH command selects only the dedicated personal key and disables SSH-agent identities. Its pre-push hook verifies the remote and authenticated GitHub username before allowing a push. The Pages workflow is restricted to owner `TamirCohen`.
 
 1. While logged in as **TamirCohen**, add `/home/ubuntu/.ssh/id_ed25519_tamircohen_keylab.pub` at https://github.com/settings/ssh/new. This key was generated on the remote development machine, not your laptop. Never upload the private key.
-2. Create an empty public repository named **strudel-keys** at https://github.com/new, owned by **TamirCohen**. SSH keys authorize Git pushes but cannot create repositories or configure Pages through GitHub's API.
+2. Create an empty private repository named **strudel-keys** at https://github.com/new, owned by **TamirCohen**. SSH keys authorize Git pushes but cannot create repositories or configure Pages through GitHub's API.
 3. Push this local repository to its configured personal remote: `git push -u origin main`.
 4. In that repository's Settings → Pages, choose **GitHub Actions** as the source. Run/re-run the **Deploy Keylab to GitHub Pages** workflow if necessary.
 

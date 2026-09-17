@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+if [ "$2" != 'git@github.com:TamirCohen/strudel-keys.git' ]; then
+  echo 'Push blocked: this project may only be pushed to TamirCohen/strudel-keys.' >&2
+  exit 1
+fi
+identity=$(ssh -F /dev/null -i /home/ubuntu/.ssh/id_ed25519_tamircohen_keylab -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o ConnectTimeout=10 -T git@github.com 2>&1 || true)
+case "$identity" in
+  *'Hi TamirCohen! You'*) ;;
+  *) echo 'Push blocked: the dedicated key has not authenticated as TamirCohen. Add the public key to the personal account first.' >&2; exit 1 ;;
+esac

@@ -42,19 +42,33 @@ try{
  // Scale is a visual guide, not a musical transform or input restriction.
  assert.equal(await page.inputValue('#scale-type'),'off');assert.equal(await page.locator('.pad.out-of-scale').count(),0);
  const beforeScale=(await state()).project.tracks[0].code;
- await page.selectOption('#scale-type','major');
+ await page.selectOption('#scale-type','C:major');
  assert.equal(await page.locator('.pad.out-of-scale').count(),5);
  assert.ok(await page.locator('[data-key="w"]').evaluate(el=>el.classList.contains('out-of-scale')));
  assert.ok(await page.locator('.lane.out-of-scale').count()>0);
- await page.dispatchEvent('body','keydown',{key:'w',code:'KeyW',bubbles:true});
+ await page.keyboard.down('w');
  assert.ok(await page.locator('[data-key="w"]').evaluate(el=>el.classList.contains('active')));
- await page.dispatchEvent('body','keyup',{key:'w',code:'KeyW',bubbles:true});
- await page.selectOption('#scale-root','7');
+ await page.keyboard.up('w');
+ await page.selectOption('#scale-type','G:major');
+ await page.locator('[data-key="f"]').click();
+ await page.keyboard.down('a');assert.ok(await page.locator('[data-key="a"]').evaluate(el=>el.classList.contains('active')));await page.keyboard.up('a');
  assert.ok(await page.locator('[data-key="f"]').evaluate(el=>el.classList.contains('out-of-scale')));
  assert.ok(await page.locator('[data-key="t"]').evaluate(el=>!el.classList.contains('out-of-scale')));
  assert.equal((await state()).project.tracks[0].code,beforeScale);
+ const scaleMismatches=await page.evaluate(async()=>{
+  const {SCALES,scaleName,inScale}=await import('/scales.js'),live=await import('/live-strudel.js');const failures=[];
+  for(let root=0;root<12;root++)for(const [scale,{steps}]of Object.entries(SCALES)){
+   if(scale==='off')continue;
+   const name=scaleName(root,scale),{pattern}=await live.compile('$: n("'+steps.map((_,i)=>i).join(' ')+'").scale("'+name+'")');
+   const pitches=live.eventsForPattern(pattern,1).map(n=>((n.pitch%12)+12)%12).sort((a,b)=>a-b);
+   const expected=Array.from({length:12},(_,i)=>i).filter(p=>inScale(p,root,scale));
+   if(JSON.stringify(pitches)!==JSON.stringify(expected))failures.push({name,pitches,expected});
+  }
+  return failures;
+ });
+ assert.deepEqual(scaleMismatches,[]);
  await page.selectOption('#scale-type','off');assert.equal(await page.locator('.pad.out-of-scale').count(),0);
- await page.selectOption('#scale-type','major');
+ await page.selectOption('#scale-type','C:major');
  // Volume is a code control, not an independent mixer state.
  await page.locator('[data-volume]').first().fill('0.35');await page.locator('[data-volume]').first().dispatchEvent('change');await settle();
  s=await state();assert.ok(s.project.tracks[0].code.includes('postgain(0.35)'));assert.ok(s.views[s.project.tracks[0].id].every(n=>n.value.postgain===.35));
@@ -142,7 +156,7 @@ try{
  const before=(await saved()).tracks.map(t=>t.code);
  await page.reload();await page.click('#audio');await page.waitForFunction(()=>document.querySelector('#audio').textContent.includes('enabled'));
  assert.deepEqual((await state()).project.tracks.map(t=>t.code),before);
- assert.equal(await page.inputValue('#scale-type'),'major');assert.equal(await page.inputValue('#scale-root'),'7');
+ assert.equal(await page.inputValue('#scale-type'),'C:major');
  // Failed compilation must not change the canonical source.
  await page.fill('#track-code','$: broken(');await page.click('#run-code');await settle();
  assert.deepEqual((await state()).project.tracks.map(t=>t.code),before);

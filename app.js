@@ -1,7 +1,7 @@
 import {DRUMS,SYNTH_KEYS,SOUNDS,isDrum,noteName,mod} from './core.js';
 import {createProject,createTrack,restoreProject,tempoBpm,tempoCode,inputValue,projectCode} from './project.js';
 import {assertEditable,cleanCode,withVolume,equivalentEvents} from './clean-code.js';
-import {ROOTS,SCALES,inScale} from './scales.js';
+import {ROOTS,SCALES,inScale,scaleName,parseScaleName} from './scales.js';
 import {shareURL,projectFromHash} from './share.js';
 import {stripTempo} from './code-scope.js';
 import * as live from './live-strudel.js';
@@ -15,7 +15,7 @@ let octave=4,grid=.25,selection=null,gesture=null,only=null,lastLoop=-1,recorded
 const views=new Map(),drafts=new Map(),history=[],held=new Map();
 let rollFocus='';
 let editError='';
-let sharedPending=false,sharedSession=false,trustRequest=null;
+let sharedPending=false,sharedSession=false;
 let scaleRoot=0,scale='off';
 try{const saved=JSON.parse(localStorage.getItem('live-strudel-scale'));if(saved&&Object.hasOwn(SCALES,saved.scale)&&Number.isInteger(saved.root)&&saved.root>=0&&saved.root<12){scaleRoot=saved.root;scale=saved.scale;}}catch{}
 const outsideScale=pitch=>typeof pitch==='number'&&!inScale(pitch,scaleRoot,scale);
@@ -25,13 +25,6 @@ const currentNotes=()=>views.get(selected)||[];
 const options=()=>({metronome:$('metro').checked,only});
 try{const saved=localStorage.getItem('keylab-project');if(saved)project=restoreProject(JSON.parse(saved));selected=project.tracks[0]?.id;}catch{status('Could not restore the saved project. Open a saved file to recover it.');}
 function persist(){localStorage.setItem(sharedSession?'keylab-shared-project':'keylab-project',JSON.stringify(project));}
-async function trustShared(){
- if(!sharedPending)return true;
- if(!trustRequest)trustRequest=new Promise(resolve=>{
-  const dialog=$('trust-dialog');dialog.showModal();dialog.onclose=()=>{const accepted=dialog.returnValue==='trust';if(accepted)sharedPending=false;trustRequest=null;resolve(accepted);};
- });
- return trustRequest;
-}
 function saveUndo(value=JSON.stringify(project)){history.push(value);if(history.length>80)history.shift();$('undo').disabled=false;}
 function mapping(){
  const t=track();if(!t)return [];
@@ -68,13 +61,13 @@ function render(){
  <label class="track-volume">Volume <input data-volume="${t.id}" aria-label="Track ${i+1} volume" type="range" min="0" max="1" step=".01" value="${trackVolume(t)}"><output>${Math.round(trackVolume(t)*100)}%</output></label></div>`).join('');
  $('record').disabled=!t||busy;$('play').disabled=!t||busy;
  $('play').textContent=running?'■ Stop music':'▶ Play music';$('play').setAttribute('aria-label',running?'Stop music':'Play music');
- $('play-hint').textContent=running?(only?'Playing selected track':'Playing all tracks'):(sharedPending?'Shared project loaded. Press Play music to review and start.':'Press Play music to hear your tracks.');
+ $('play-hint').textContent=running?(only?'Playing selected track':'Playing all tracks'):(sharedPending?'Shared project loaded. Press Play music to start.':'Press Play music to hear your tracks.');
  $('share').disabled=busy||recording;
  for(const id of ['bpm','bars','add-track','load'])$(id).disabled=busy||recording;
  if(t){
   $('editor-title').textContent=t.name;$('sound').value=t.instrument;$('volume').value=trackVolume(t);
   $('octave').textContent=octave;$('octave-control').style.display=isDrum(t.instrument)?'none':'flex';
-  $('scale-controls').hidden=isDrum(t.instrument);$('scale-root').value=scaleRoot;$('scale-type').value=scale;$('scale-root').disabled=scale==='off';
+  $('scale-controls').hidden=isDrum(t.instrument);$('scale-type').value=scaleName(scaleRoot,scale);
   $('delete-note').disabled=!selection||busy||recording;$('clear').disabled=!currentNotes().length||busy||recording;
   $('quantize').disabled=busy||recording;$('run-code').disabled=busy||recording;$('simplify-code').disabled=busy||recording;
   const code=drafts.get(t.id)??t.code;if($('track-code').value!==code)$('track-code').value=code;
@@ -122,7 +115,7 @@ function renderOverview(){
  }).join('')||'<p class="small">Add a track to see its timeline.</p>';
 }
 async function enable(){
- if(!await trustShared())return false;
+ sharedPending=false;
  if(ready)return true;
  $('audio').disabled=true;$('audio').textContent='Loading…';
  try{const {context,manifest}=await live.initialize();await monitor.init(manifest,context);await live.prepare(project);refreshViews();ready=true;$('audio').textContent='Audio enabled ✓';render();return true;}
@@ -146,7 +139,7 @@ async function commitCode(t,code,{before=JSON.stringify(project),undo=true}={}){
 }
 async function transaction(action){
  if(busy)return;busy=true;editError='';document.body.dataset.busy='true';
- try{if(await trustShared())await action();}catch(e){editError=e.message;status(e.message);$('code-state').textContent=e.message;}
+ try{await action();}catch(e){editError=e.message;status(e.message);$('code-state').textContent=e.message;}
  finally{busy=false;render();}
 }
 async function editNotes(remove,add){
@@ -235,10 +228,9 @@ function animate(){
  requestAnimationFrame(animate);
 }
 const soundOptions=Object.entries(SOUNDS).map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
-$('scale-root').innerHTML=ROOTS.map((name,i)=>`<option value="${i}">${name}</option>`).join('');
-$('scale-type').innerHTML=Object.entries(SCALES).map(([value,s])=>`<option value="${value}">${s.label}</option>`).join('');
-function changeScale(){scaleRoot=Number($('scale-root').value);scale=$('scale-type').value;localStorage.setItem('live-strudel-scale',JSON.stringify({root:scaleRoot,scale}));render();}
-$('scale-root').onchange=changeScale;$('scale-type').onchange=changeScale;
+$('scale-type').innerHTML='<option value="off">Off — all notes</option>'+ROOTS.map((name,root)=>`<optgroup label="${name}">${Object.keys(SCALES).filter(s=>s!=='off').map(s=>`<option value="${scaleName(root,s)}">${scaleName(root,s)}</option>`).join('')}</optgroup>`).join('');
+function changeScale(e){const choice=parseScaleName(e.target.value);releaseAll();scaleRoot=choice.root;scale=choice.scale;localStorage.setItem('live-strudel-scale',JSON.stringify({root:scaleRoot,scale}));render();e.target.blur();}
+$('scale-type').onchange=changeScale;
 $('sound').innerHTML=soundOptions;$('new-sound').innerHTML=soundOptions;
 $('audio').onclick=enable;$('play').onclick=()=>start();$('record').onclick=()=>start(true);$('stop').onclick=()=>stop();$('stop-code').onclick=()=>stop();$('undo').onclick=undo;
 $('add-track').onclick=()=>{if(project.tracks.length>=32){status('Maximum 32 tracks.');return;}$('track-dialog').showModal();};
@@ -296,7 +288,7 @@ $('quantize').onclick=()=>{
 };
 function changeOctave(delta){releaseAll();octave=Math.max(1,Math.min(7,octave+delta));render();}
 $('oct-down').onclick=()=>changeOctave(-1);$('oct-up').onclick=()=>changeOctave(1);
-$('keys').onpointerdown=e=>{const pad=e.target.closest('[data-key]');if(!pad)return;e.preventDefault();pad.setPointerCapture(e.pointerId);press(pad.dataset.key);};
+$('keys').onpointerdown=e=>{const pad=e.target.closest('[data-key]');if(!pad)return;e.preventDefault();pad.focus({preventScroll:true});pad.setPointerCapture(e.pointerId);press(pad.dataset.key);};
 $('keys').onpointerup=e=>{const pad=e.target.closest('[data-key]');if(pad)release(pad.dataset.key);};$('keys').onpointercancel=$('keys').onpointerup;
 const physicalKey=e=>/^Key[A-Z]$/.test(e.code)?e.code.slice(3).toLowerCase():e.key.toLowerCase();
 window.addEventListener('keydown',e=>{
@@ -366,7 +358,7 @@ async function bootstrap(){
  busy=true;render();
  try{
   const shared=await projectFromHash(location.hash);
-  if(shared){project=shared;selected=project.tracks[0]?.id;sharedPending=true;sharedSession=true;status('Shared project loaded. Review the code, then press Play music.');}
+  if(shared){project=shared;selected=project.tracks[0]?.id;sharedPending=true;sharedSession=true;status('Shared project loaded. Press Play music to start.');}
   else {await live.prepare(project);refreshViews();}
  }catch(e){status(e.message);}
  finally{busy=false;render();}

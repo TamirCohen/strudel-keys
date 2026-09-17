@@ -8,7 +8,7 @@ Requires Node.js 22.15 or newer. Run `npm ci`, then `npm run dev` and open the p
 
 Press **Play music** to enable audio and start all tracks in one step. **Enable keyboard** is only for playing pads without starting the transport. **Run track** applies and auditions the selected track.
 
-**Share** copies a compressed, versioned URL containing the tracks, Strudel code, tempo, loop length, mute, and solo settings. No upload or account is needed; anyone with the link can open a copy. It is a snapshot, so later edits require a new link. Large projects should use Save instead. Incoming shared code is displayed without execution until the recipient explicitly trusts it. Shared-session autosave is separate from the recipient's existing project.
+**Share** copies a compressed, versioned URL containing the tracks, Strudel code, tempo, loop length, mute, and solo settings. No upload or account is needed; anyone with the link can open a copy. It is a snapshot, so later edits require a new link. Large projects should use Save instead. Incoming shared code is displayed without execution on opening. Pressing Play music starts it directly, without a confirmation popup. Shared-session autosave is separate from the recipient's existing project.
 
 ## One musical source
 
@@ -24,7 +24,7 @@ The per-track volume sliders write a `postgain(...)` transform into Strudel. Mut
 
 Melodies use named notes (`c3`, `f#4`) rather than MIDI numbers. Held lengths use mini-notation weights such as `c3@2`, without generated legato calls. Exact off-grid timings still need timecat/slow/late. New notes do not add attack, sustain, or release controls; explicit envelope settings already in your code remain intact.
 
-For synth tracks, **Scale** and **Root** provide an optional visual guide. Off is the default. Notes outside the selected scale are gray in the keyboard and piano roll, but remain playable and editable. The guide never changes Strudel, pitches, or recordings. Your guide preference is remembered locally, separate from musical project state.
+For synth tracks, **Scale** provides an optional visual guide using Strudel names such as C:major, C:minor, and A:minor:pentatonic. Off is the default. Notes outside the selected scale are gray in the keyboard and piano roll, but remain playable and editable. Changing scale returns focus to note playing. The guide never changes Strudel, pitches, or recordings. Your guide preference is remembered locally, separate from musical project state.
 
 ## Editing and recording
 

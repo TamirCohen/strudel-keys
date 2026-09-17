@@ -1,5 +1,6 @@
 import {scopeCode} from './code-scope.js';
 import {tempoBpm} from './project.js';
+import {noteMidi} from './core.js';
 let api,repl,initPromise,mix,countIn=0,playing=false;
 const cache=new Map();
 const triggers=[];
@@ -107,11 +108,7 @@ export function eventsForPattern(pattern,bars,begin=0){
  return events.map((h,index)=>{
   const raw=normalizeControls(h.value||{}),value=JSON.parse(JSON.stringify(raw));
   delete value.id;delete value.duration;
-  let pitch=raw.note;
-  if(typeof pitch==='string'){
-   const m=/^([a-g])([#b]?)(-?\d+)$/i.exec(pitch);
-   pitch=m?(Number(m[3])+1)*12+({c:0,d:2,e:4,f:5,g:7,a:9,b:11}[m[1].toLowerCase()])+(m[2]==='#'?1:m[2]==='b'?-1:0):Number(pitch);
-  }
+  const pitch=noteMidi(raw.note);
   const pitched=Number.isFinite(pitch);
   const start=(Number(h.whole.begin)-begin)*4;
   const duration=raw.note===undefined?.15:Number(h.whole.end.sub(h.whole.begin))*4*(Number(raw.clip)||1);

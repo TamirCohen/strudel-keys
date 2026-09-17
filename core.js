@@ -5,6 +5,13 @@ export const COLORS = ['#8b9dff','#c4a2ed','#7fb8d4','#d6a3b6','#91b8ac','#b2b6c
 export const isDrum = sound => sound === '909' || sound === 'acoustic';
 export const noteName = midi => ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'][midi % 12] + (Math.floor(midi / 12) - 1);
 export const strudelNote = midi => Number.isInteger(midi)?['c','c#','d','d#','e','f','f#','g','g#','a','a#','b'][mod(midi,12)]+(Math.floor(midi/12)-1):midi;
+export function noteMidi(value){
+ if(typeof value!=='string')return value;
+ const m=/^([a-g])(#+|b+|x)?(-?\d+)$/i.exec(value);
+ if(!m)return Number(value);
+ const accidental=m[2]||'';
+ return (Number(m[3])+1)*12+({c:0,d:2,e:4,f:5,g:7,a:9,b:11}[m[1].toLowerCase()])+(accidental.toLowerCase()==='x'?2:accidental.startsWith('#')?accidental.length:-accidental.length);
+}
 export const mod = (n,m) => ((n%m)+m)%m;
 export function newTrack(sound='909', index=0) { return {id:crypto.randomUUID(), sound, name:SOUNDS[sound], volume:.8, mute:false, solo:false, color:COLORS[index%COLORS.length], notes:[]}; }
 export function quantizeNotes(notes, grid, beats) {

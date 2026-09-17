@@ -1,5 +1,5 @@
 import {parse} from 'acorn';
-import {gridPattern,melodyPattern,strudelNote} from './core.js';
+import {gridPattern,melodyPattern,strudelNote,noteMidi} from './core.js';
 
 const fmt=n=>String(Number(n.toFixed(8)));
 const quote=JSON.stringify;
@@ -7,9 +7,7 @@ const ast=code=>parse(code,{ecmaVersion:2022,allowAwaitOutsideFunction:true});
 function pitchOf(event){
  if(event.value.note===undefined)return event.value.s;
  const pitch=event.pitch??event.value.note;
- if(typeof pitch!=='string')return pitch;
- const match=/^([a-g])([#b]?)(-?\d+)$/i.exec(pitch);
- return match?(Number(match[3])+1)*12+({c:0,d:2,e:4,f:5,g:7,a:9,b:11}[match[1].toLowerCase()])+(match[2]==='#'?1:match[2]==='b'?-1:0):Number(pitch);
+ return noteMidi(pitch);
 }
 // Only controls whose evaluated value can be written back without changing
 // its meaning. Unknown controls fail closed rather than disappear in an edit.

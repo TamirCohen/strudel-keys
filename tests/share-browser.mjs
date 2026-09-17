@@ -27,15 +27,12 @@ try{
  assert.equal(await recipient.inputValue('#bpm'),'144');assert.equal(await recipient.inputValue('#bars'),'4');
  assert.equal(await recipient.evaluate(()=>window.sharedTestRan),undefined);
  assert.equal(await recipient.evaluate(()=>window.previousTestRan),undefined);
- await recipient.click('#play');await recipient.waitForFunction(()=>document.querySelector('#trust-dialog').open);
- await recipient.locator('#trust-dialog [value="cancel"]').click();
- await recipient.waitForFunction(()=>document.body.dataset.busy==='false');
- assert.equal(await recipient.evaluate(()=>window.sharedTestRan),undefined);
- await recipient.click('#play');await recipient.locator('#trust-dialog [value="trust"]').click();
+ assert.equal(await recipient.locator('#trust-dialog').count(),0);
+ await recipient.click('#play');
  await recipient.waitForFunction(()=>document.querySelector('#status').textContent==='Playing Strudel.',null,{timeout:60000});
  assert.equal(await recipient.evaluate(()=>window.sharedTestRan),true);await recipient.click('#stop');
  assert.deepEqual(await recipient.evaluate(()=>JSON.parse(localStorage.getItem('keylab-project'))),previous);
  assert.equal(await recipient.evaluate(()=>JSON.parse(localStorage.getItem('keylab-shared-project')).tracks[0].code),shared.tracks[0].code);
  assert.deepEqual(errors,[]);
- console.log('PASS: share UI round-trip, one-click playback, no execution before consent, cancel/accept, shared tempo/loop, saved project isolation.');
+ console.log('PASS: share UI round-trip, direct one-click shared playback, no execution on opening, no trust popup, shared tempo/loop, saved project isolation.');
 }finally{await browser.close();}

@@ -14,7 +14,7 @@ async function apply(code){
 }
 try{
  await page.goto('http://127.0.0.1:5173');
- await page.click('#audio');await page.waitForFunction(()=>document.querySelector('#audio').textContent.includes('enabled'),null,{timeout:60000});
+ await page.keyboard.down('a');await page.waitForFunction(()=>document.body.dataset.audioReady==='true',null,{timeout:60000});await page.keyboard.up('a');
  await apply('$: s("bd*4").bank("RolandTR909")');
  await page.waitForTimeout(650);
  let s=await state();
@@ -74,7 +74,7 @@ try{
  s=await state();assert.ok(s.project.tracks[0].code.includes('postgain(0.35)'));assert.ok(s.views[s.project.tracks[0].id].every(n=>n.value.postgain===.35));
  await page.locator('.lane-grid[data-pitch="72"]').click({position:{x:120,y:10}});await settle();
  s=await state();assert.equal(s.views[s.project.tracks[0].id].length,9);assert.ok(s.views[s.project.tracks[0].id].every(n=>n.value.postgain===.35));
- await page.click('#undo');await settle();
+ await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();
  // Sound picker and all-track view.
  await page.click('#add-track');await page.selectOption('#new-sound','909');await page.click('#create-track');await settle();
  assert.equal(await page.locator('.track').count(),2);assert.equal(await page.locator('.arrangement-row').count(),2);
@@ -113,7 +113,7 @@ try{
  await page.click('#simplify-code');await settle();s=await state();
  assert.equal(s.project.tracks[1].code,'$: s("bd*4, [~ cp]*2, hh*16").bank("RolandTR909").postgain(0.3)');
  assert.equal(s.views[s.project.tracks[1].id].length,oldCount);assert.ok(!s.strudel.includes('_klParts'));
- await page.click('#undo');await settle();assert.equal((await state()).project.tracks[1].code,legacy);
+ await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();assert.equal((await state()).project.tracks[1].code,legacy);
  await page.click('#simplify-code');await settle();
  // Evolving code still plays, but a destructive fixed-window rewrite is rejected.
  await apply('$: s("<bd cp>").bank("RolandTR909")');await page.click('#stop');
@@ -139,8 +139,8 @@ try{
  assert.ok(longer.duration>original.duration);assert.equal(longer.start,original.start);assert.equal(longer.pitch,original.pitch);
  assert.equal(s.views[resizedId].length,1);assert.notEqual(s.project.tracks.at(-1).code,originalCode);
  await resizeBy(-.5);s=await state();assert.ok(s.views[resizedId][0].duration<longer.duration);
- await page.click('#undo');await settle();s=await state();assert.equal(s.views[resizedId][0].duration,longer.duration);
- await page.click('#undo');await settle();s=await state();assert.equal(s.project.tracks.at(-1).code,originalCode);
+ await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();s=await state();assert.equal(s.views[resizedId][0].duration,longer.duration);
+ await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();s=await state();assert.equal(s.project.tracks.at(-1).code,originalCode);
  // Drag diagonally to change time AND pitch, then resize the moved note.
  const note=page.locator('.note').first();await note.scrollIntoViewIfNeeded();
  const noteBox=await note.boundingBox(),targetLane=await page.locator(`.lane-grid[data-pitch="${original.pitch+1}"]`).boundingBox();
@@ -151,16 +151,16 @@ try{
  await resizeBy(.5);s=await state();assert.ok(s.views[resizedId][0].duration>moved.duration);
  assert.equal(s.views[resizedId][0].start,moved.start);assert.equal(s.views[resizedId][0].pitch,moved.pitch);
  assert.ok(!/legato|attack|sustain|release/.test(s.project.tracks.at(-1).code));assert.ok(s.project.tracks.at(-1).code.includes('c#4'));
- await page.click('#undo');await settle();await page.click('#undo');await settle();
+ await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();
  assert.equal((await state()).project.tracks.at(-1).code,originalCode);
  const before=(await saved()).tracks.map(t=>t.code);
- await page.reload();await page.click('#audio');await page.waitForFunction(()=>document.querySelector('#audio').textContent.includes('enabled'));
+ await page.reload();await page.keyboard.down('a');await page.waitForFunction(()=>document.body.dataset.audioReady==='true',null,{timeout:60000});await page.keyboard.up('a');
  assert.deepEqual((await state()).project.tracks.map(t=>t.code),before);
  assert.equal(await page.inputValue('#scale-type'),'C:major');
  // Failed compilation must not change the canonical source.
  await page.fill('#track-code','$: broken(');await page.click('#run-code');await settle();
  assert.deepEqual((await state()).project.tracks.map(t=>t.code),before);
- await page.reload();await page.click('#audio');await page.waitForFunction(()=>document.querySelector('#audio').textContent.includes('enabled'));
+ await page.reload();await page.keyboard.down('a');await page.waitForFunction(()=>document.body.dataset.audioReady==='true',null,{timeout:60000});await page.keyboard.up('a');
  await page.screenshot({path:'/tmp/live-strudel-desktop.png',fullPage:true});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'/tmp/live-strudel-mobile.png',fullPage:true});
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));

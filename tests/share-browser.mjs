@@ -7,7 +7,7 @@ const base='http://127.0.0.1:5173/';
 try{
  const sender=await browser.newPage();await sender.goto(base);
  await sender.waitForFunction(()=>document.body.dataset.busy==='false');
- assert.equal(await sender.locator('#save, #load, #file').count(),0);
+ assert.equal(await sender.locator('#save, #load, #file, #undo, #audio').count(),0);
  assert.equal(await sender.textContent('#play'),'▶ Play music');
  // No separate audio-enable step is needed to play.
  await sender.click('#play');await sender.waitForFunction(()=>document.querySelector('#status').textContent==='Playing Strudel.');

@@ -16,6 +16,8 @@ const views=new Map(),drafts=new Map(),history=[],held=new Map();
 let rollFocus='';
 let editError='';
 let sharedPending=false,sharedSession=false;
+let enabling=null;
+const pendingKeys=new Set();
 let scaleRoot=0,scale='off';
 try{const saved=JSON.parse(localStorage.getItem('live-strudel-scale'));if(saved&&Object.hasOwn(SCALES,saved.scale)&&Number.isInteger(saved.root)&&saved.root>=0&&saved.root<12){scaleRoot=saved.root;scale=saved.scale;}}catch{}
 const outsideScale=pitch=>typeof pitch==='number'&&!inScale(pitch,scaleRoot,scale);
@@ -25,7 +27,7 @@ const currentNotes=()=>views.get(selected)||[];
 const options=()=>({metronome:$('metro').checked,only});
 try{const saved=localStorage.getItem('keylab-project');if(saved)project=restoreProject(JSON.parse(saved));selected=project.tracks[0]?.id;}catch{status('Could not restore the saved project. Open a share link to recover it.');}
 function persist(){localStorage.setItem(sharedSession?'keylab-shared-project':'keylab-project',JSON.stringify(project));}
-function saveUndo(value=JSON.stringify(project)){history.push(value);if(history.length>80)history.shift();$('undo').disabled=false;}
+function saveUndo(value=JSON.stringify(project)){history.push(value);if(history.length>80)history.shift();}
 function mapping(){
  const t=track();if(!t)return [];
  return isDrum(t.instrument)?DRUMS.map(([key,pitch,label])=>({key,pitch,label})):SYNTH_KEYS.map((key,i)=>({key,pitch:(octave+1)*12+i,label:noteName((octave+1)*12+i)}));
@@ -52,7 +54,6 @@ function render(){
  document.body.dataset.busy=String(busy);
  const t=track();
  $('bpm').value=Math.round(tempoBpm(project)*100)/100;$('bars').value=project.bars;
- $('undo').disabled=!history.length||busy;
  $('editor-content').hidden=!t;$('empty-state').hidden=!!t;$('instrument').hidden=!t;
  $('track-count').textContent=project.tracks.length;$('remove-all').disabled=!project.tracks.length||busy;
  $('tracks').innerHTML=project.tracks.map((t,i)=>`<div class="track ${t.id===selected?'selected':''}" style="--track-color:${t.color}" data-track="${t.id}">
@@ -117,10 +118,14 @@ function renderOverview(){
 async function enable(){
  sharedPending=false;
  if(ready)return true;
- $('audio').disabled=true;$('audio').textContent='Loading…';
- try{const {context,manifest}=await live.initialize();await monitor.init(manifest,context);await live.prepare(project);refreshViews();ready=true;$('audio').textContent='Audio enabled ✓';render();return true;}
- catch(e){status(e.message);$('audio').textContent='Retry audio';return false;}
- finally{$('audio').disabled=false;}
+ if(enabling)return enabling;
+ status('Loading sounds…');
+ enabling=(async()=>{
+  try{const {context,manifest}=await live.initialize();await monitor.init(manifest,context);await live.prepare(project);refreshViews();ready=true;document.body.dataset.audioReady='true';status('Ready. Play notes or press Play music.');return true;}
+  catch(e){status(e.message+' Try playing a note again.');return false;}
+  finally{enabling=null;}
+ })();
+ return enabling;
 }
 async function commitCode(t,code,{before=JSON.stringify(project),undo=true}={}){
  // Keep the UI's track-level volume after appended recordings and note edits.
@@ -192,19 +197,24 @@ async function stop(){
 }
 function press(key){
  const t=track(),m=mapping().find(m=>m.key===key);if(!t||!m||held.has(key))return;
- if(!ready){status('Enable audio first.');return;}
+ if(!ready){
+  if(pendingKeys.has(key))return;
+  pendingKeys.add(key);const target=selected;
+  enable().then(ok=>{if(pendingKeys.delete(key)&&ok&&selected===target)press(key);});return;
+ }
  const absolute=live.cycles()*4;
  const voice=monitor.play({sound:t.instrument,volume:.8*trackVolume(t)},m.pitch);
  held.set(key,{voice,pitch:m.pitch,start:absolute,instrument:t.instrument,record:recording&&absolute>=0});
  document.querySelector(`[data-key="${key}"]`)?.classList.add('active');
 }
 function release(key){
+ pendingKeys.delete(key);
  const h=held.get(key);if(!h)return;
  if(!isDrum(h.instrument))h.voice();
  if(h.record){recorded.push({id:crypto.randomUUID(),pitch:h.pitch,start:mod(h.start,beats()),duration:isDrum(h.instrument)?.15:Math.min(beats(),Math.max(.04,live.cycles()*4-h.start))});$('note-count').textContent=recorded.length+' new notes';}
  held.delete(key);document.querySelector(`[data-key="${key}"]`)?.classList.remove('active');
 }
-function releaseAll(){for(const key of [...held.keys()])release(key);}
+function releaseAll(){pendingKeys.clear();for(const key of [...held.keys()])release(key);}
 async function undo(){
  if(busy||(!history.length&&!recording))return;
  await transaction(async()=>{
@@ -232,7 +242,7 @@ $('scale-type').innerHTML='<option value="off">Off — all notes</option>'+ROOTS
 function changeScale(e){const choice=parseScaleName(e.target.value);releaseAll();scaleRoot=choice.root;scale=choice.scale;localStorage.setItem('live-strudel-scale',JSON.stringify({root:scaleRoot,scale}));render();e.target.blur();}
 $('scale-type').onchange=changeScale;
 $('sound').innerHTML=soundOptions;$('new-sound').innerHTML=soundOptions;
-$('audio').onclick=enable;$('play').onclick=()=>start();$('record').onclick=()=>start(true);$('stop').onclick=()=>stop();$('stop-code').onclick=()=>stop();$('undo').onclick=undo;
+$('play').onclick=()=>start();$('record').onclick=()=>start(true);$('stop').onclick=()=>stop();$('stop-code').onclick=()=>stop();
 $('add-track').onclick=()=>{if(project.tracks.length>=32){status('Maximum 32 tracks.');return;}$('track-dialog').showModal();};
 $('empty-add').onclick=()=>$('add-track').click();
 $('create-track').onclick=()=>transaction(async()=>{

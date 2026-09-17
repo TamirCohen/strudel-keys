@@ -1,5 +1,5 @@
 import {parse} from 'acorn';
-import {gridPattern} from './core.js';
+import {gridPattern,melodyPattern,strudelNote} from './core.js';
 
 const fmt=n=>String(Number(n.toFixed(8)));
 const quote=JSON.stringify;
@@ -142,11 +142,11 @@ function controls(event){
 const chain=values=>Object.entries(values).sort(([a],[b])=>a.localeCompare(b)).map(([key,value])=>'.'+controlNames[key]+'('+quote(value)+')').join('');
 function musicalPattern(events,bars,pitched){
  const notes=events.map(n=>({start:n.start,duration:n.duration,pitch:pitched?n.pitch:n.value.s}));
- const compact=gridPattern(notes,bars*4,!pitched);
- if(compact)return compact.replace(/\.legato\(1\)$/,'');
+ const compact=pitched?melodyPattern(notes,bars*4):gridPattern(notes,bars*4,true);
+ if(compact)return compact;
  // Exact off-grid timing stays readable native Strudel, without JSON or IDs.
  const parts=notes.map(n=>{
-  const duration=Math.min(n.duration,bars*4),sound=(pitched?'note':'s')+'('+quote(n.pitch)+')';
+  const duration=Math.min(n.duration,bars*4),sound=(pitched?'note':'s')+'('+quote(pitched?strudelNote(n.pitch):n.pitch)+')';
   return 'timecat(['+fmt(duration)+', '+sound+'], ['+fmt(bars*4-duration)+', silence]).slow('+bars+').late('+fmt(n.start/4)+')';
  });
  return parts.length===1?parts[0]:'stack('+parts.join(', ')+')';
@@ -164,7 +164,7 @@ export function cleanCode(events,bars){
  const groups=new Map();
  for(const n of prepared){
   const own=Object.fromEntries(Object.entries(n.controls).filter(([k])=>!(k in common)).sort(([a],[b])=>a.localeCompare(b)));
-  const key=JSON.stringify([n.pitched,n.pitched?Number(n.duration.toFixed(8)):n.pitch,own]);
+  const key=JSON.stringify([n.pitched,n.pitched?'melody':n.pitch,own]);
   if(!groups.has(key))groups.set(key,{pitched:n.pitched,own,events:[]});
   groups.get(key).events.push(n);
  }
@@ -221,4 +221,25 @@ export function eventSignature(events){
   return JSON.stringify([Number(n.start.toFixed(6)),pitched?Number(n.duration.toFixed(6)):null,
    pitched?pitchOf(n):null,Object.entries(value).sort(([a],[b])=>a.localeCompare(b))]);
  }).sort().join('\n');
+}
+export function equivalentEvents(left,right){
+ const groups=events=>{
+  const map=new Map();
+  for(const n of events){
+   const pitched=n.value.note!==undefined,value={...n.value};
+   for(const key of ['note','id','keylabId','cps','duration'])delete value[key];
+   if(pitched)delete value.clip;
+   const key=JSON.stringify([pitched?pitchOf(n):null,Object.entries(value).sort(([a],[b])=>a.localeCompare(b))]);
+   if(!map.has(key))map.set(key,[]);map.get(key).push([n.start,pitched?n.duration:0]);
+  }
+  for(const list of map.values())list.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+  return map;
+ };
+ const a=groups(left),b=groups(right);
+ if(a.size!==b.size)return false;
+ for(const [key,notes]of a){
+  const other=b.get(key);if(!other||notes.length!==other.length)return false;
+  if(notes.some((n,i)=>n.some((v,j)=>Math.abs(v-other[i][j])>1e-6)))return false;
+ }
+ return true;
 }

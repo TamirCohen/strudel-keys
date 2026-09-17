@@ -5,7 +5,8 @@ import * as patterns from '@strudel/core/pattern.mjs';
 import * as controls from '@strudel/core/controls.mjs';
 registerHooks({resolve(specifier,context,next){return next(specifier==='@strudel/core'?new URL('./strudel-core.mjs',import.meta.url).href:specifier,context);}});
 const {mini}=await import('@strudel/mini');patterns.setStringParser(mini);
-import {cleanCode,rewriteNotes,assertEditable,eventSignature,withVolume} from '../clean-code.js';
+import {cleanCode,rewriteNotes,assertEditable,eventSignature,withVolume,equivalentEvents} from '../clean-code.js';
+import {inputValue} from '../project.js';
 const scope={...patterns,...controls};
 function events(code,bars=2){
  const pattern=Function(...Object.keys(scope),'return '+code.replace(/^\$:\s*/,''))(...Object.values(scope));
@@ -54,4 +55,24 @@ test('volume replaces its control and does not accumulate transforms',()=>{
  for(const v of [.2,.3,.4])code=withVolume(code,v);
  assert.equal(code,'$: s("bd*4").bank("RolandTR909").postgain(0.4)');
  assert.equal(withVolume('$: note("60").postgain(.2).s("sine")',.3),'$: note("60").s("sine").postgain(0.3)');
+});
+test('melodies use real note names and weights, without legato or default envelopes',()=>{
+ const source='$: note("c3@2 e3 g3").s("sawtooth")',notes=events(source);
+ const code=cleanCode(notes,2);
+ assert.equal(code,source);assert.equal(eventSignature(events(code)),eventSignature(notes));
+ assert.deepEqual(inputValue('sawtooth',48),{note:48,s:'sawtooth',gain:.8});
+ assert.ok(!/legato|attack|sustain|release/.test(code));
+ for(const source of ['$: note("[c3,e3]@2 ~ g3").s("sine")','$: note("c#3 d3 f#3 a3").s("sine")','$: note("c3@2 c3@2 c3@2 c3@2").s("sine")']){
+  const notes=events(source),code=cleanCode(notes,2);
+  assert.equal(eventSignature(events(code)),eventSignature(notes));assertEditable(code,2);assert.ok(!code.includes('legato'));
+ }
+});
+test('sub-microbeat serialization rounding does not reject moving recorded notes',()=>{
+ const notes=[{start:0,duration:1.234567499,pitch:60,value:{note:60,s:'sine'}}];
+ const rewritten=events(cleanCode(notes,2));
+ assert.notEqual(eventSignature(notes),eventSignature(rewritten));
+ assert.equal(equivalentEvents(notes,rewritten),true);
+ assert.equal(equivalentEvents(notes,[{...notes[0],duration:1.25}]),false);
+ assert.equal(equivalentEvents(notes,[{...notes[0],pitch:61,value:{note:61,s:'sine'}}]),false);
+ assert.equal(equivalentEvents(notes,[{...notes[0],value:{note:60,s:'square'}}]),false);
 });

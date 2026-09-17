@@ -9,7 +9,7 @@ registerHooks({resolve(specifier,context,next){
 }});
 const {mini}=await import('@strudel/mini');
 patterns.setStringParser(mini);
-import {newTrack,exportStrudel} from '../core.js';
+import {newTrack,exportStrudel,strudelNote} from '../core.js';
 globalThis.crypto??=webcrypto;
 function evaluate(p){const scope={...patterns,...controls,samples:()=>{},setcpm:()=>{}};const code=exportStrudel(p,{'909':{bd:'https://example.com/kick.wav'}});return Function(...Object.keys(scope),'code','return eval(code)')(...Object.values(scope),code);}
 test('repeated drum bars become native mini patterns with identical onsets',()=>{
@@ -23,10 +23,10 @@ test('compact melody preserves chords, held lengths and repeated phrases',()=>{
  const t=newTrack('sawtooth');t.notes=[];
  for(const offset of [0,4])for(const [start,pitch] of [[0,60],[0,64],[1,67],[2,62],[3,65]])t.notes.push({id:crypto.randomUUID(),start:start+offset,pitch,duration:1.5});
  const p={bpm:120,bars:2,tracks:[t]},code=exportStrudel(p);
- assert.ok(code.includes('note("[60,64] 67 62 65")'));
+ assert.ok(code.includes('c4'));assert.ok(!/legato|attack|sustain|release/.test(code));
  const h=evaluate(p).queryArc(0,2).filter(h=>h.hasOnset()).sort((a,b)=>Number(a.whole.begin)-Number(b.whole.begin)||a.value.note-b.value.note);
  assert.equal(h.length,10);
- h.forEach((h,i)=>{assert.equal(Number(h.whole.begin)*4,t.notes[i].start);assert.equal(h.value.note,t.notes[i].pitch);assert.equal(Number(h.whole.end.sub(h.whole.begin))*4*h.value.clip,1.5);});
+ h.forEach((h,i)=>{assert.equal(Number(h.whole.begin)*4,t.notes[i].start);assert.equal(h.value.note,strudelNote(t.notes[i].pitch));assert.equal(Number(h.whole.end.sub(h.whole.begin))*4*(h.value.clip??1),1.5);});
 });
 test('triplets and non-repeated final bars keep their timing',()=>{
  const t=newTrack('acoustic');t.notes=[0,1/3,2/3,4].map((start,i)=>({id:String(i),start,pitch:'hh',duration:.15}));

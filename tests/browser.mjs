@@ -39,6 +39,22 @@ try{
  s=await state();assert.equal(s.views[s.project.tracks[0].id].length,7);
  assert.ok(s.project.tracks[0].code.includes('.lpf(1200)'));assert.ok(s.project.tracks[0].code.includes('.room(0.2)'));assert.ok(!s.project.tracks[0].code.includes('filterHaps'));
  await page.keyboard.press('Meta+z');await settle();assert.equal(await page.locator('.note').count(),8);
+ // Scale is a visual guide, not a musical transform or input restriction.
+ assert.equal(await page.inputValue('#scale-type'),'off');assert.equal(await page.locator('.pad.out-of-scale').count(),0);
+ const beforeScale=(await state()).project.tracks[0].code;
+ await page.selectOption('#scale-type','major');
+ assert.equal(await page.locator('.pad.out-of-scale').count(),5);
+ assert.ok(await page.locator('[data-key="w"]').evaluate(el=>el.classList.contains('out-of-scale')));
+ assert.ok(await page.locator('.lane.out-of-scale').count()>0);
+ await page.dispatchEvent('body','keydown',{key:'w',code:'KeyW',bubbles:true});
+ assert.ok(await page.locator('[data-key="w"]').evaluate(el=>el.classList.contains('active')));
+ await page.dispatchEvent('body','keyup',{key:'w',code:'KeyW',bubbles:true});
+ await page.selectOption('#scale-root','7');
+ assert.ok(await page.locator('[data-key="f"]').evaluate(el=>el.classList.contains('out-of-scale')));
+ assert.ok(await page.locator('[data-key="t"]').evaluate(el=>!el.classList.contains('out-of-scale')));
+ assert.equal((await state()).project.tracks[0].code,beforeScale);
+ await page.selectOption('#scale-type','off');assert.equal(await page.locator('.pad.out-of-scale').count(),0);
+ await page.selectOption('#scale-type','major');
  // Volume is a code control, not an independent mixer state.
  await page.locator('[data-volume]').first().fill('0.35');await page.locator('[data-volume]').first().dispatchEvent('change');await settle();
  s=await state();assert.ok(s.project.tracks[0].code.includes('postgain(0.35)'));assert.ok(s.views[s.project.tracks[0].id].every(n=>n.value.postgain===.35));
@@ -48,6 +64,7 @@ try{
  // Sound picker and all-track view.
  await page.click('#add-track');await page.selectOption('#new-sound','909');await page.click('#create-track');await settle();
  assert.equal(await page.locator('.track').count(),2);assert.equal(await page.locator('.arrangement-row').count(),2);
+ assert.equal(await page.locator('#scale-controls').isVisible(),false);
  await page.locator('[data-volume]').last().fill('0.4');await page.locator('[data-volume]').last().dispatchEvent('change');await settle();
  // Recorded take is translated into canonical code.
  await page.uncheck('#countin');await page.click('#record');await page.waitForTimeout(200);
@@ -110,9 +127,22 @@ try{
  await resizeBy(-.5);s=await state();assert.ok(s.views[resizedId][0].duration<longer.duration);
  await page.click('#undo');await settle();s=await state();assert.equal(s.views[resizedId][0].duration,longer.duration);
  await page.click('#undo');await settle();s=await state();assert.equal(s.project.tracks.at(-1).code,originalCode);
+ // Drag diagonally to change time AND pitch, then resize the moved note.
+ const note=page.locator('.note').first();await note.scrollIntoViewIfNeeded();
+ const noteBox=await note.boundingBox(),targetLane=await page.locator(`.lane-grid[data-pitch="${original.pitch+1}"]`).boundingBox();
+ await page.mouse.move(noteBox.x+noteBox.width/3,noteBox.y+noteBox.height/2);await page.mouse.down();
+ await page.mouse.move(noteBox.x+noteBox.width/3+targetLane.width/16,targetLane.y+targetLane.height/2,{steps:8});await page.mouse.up();await settle();
+ s=await state();const moved=s.views[resizedId][0];
+ assert.equal(moved.pitch,original.pitch+1);assert.ok(moved.start>original.start);assert.equal(s.views[resizedId].length,1);
+ await resizeBy(.5);s=await state();assert.ok(s.views[resizedId][0].duration>moved.duration);
+ assert.equal(s.views[resizedId][0].start,moved.start);assert.equal(s.views[resizedId][0].pitch,moved.pitch);
+ assert.ok(!/legato|attack|sustain|release/.test(s.project.tracks.at(-1).code));assert.ok(s.project.tracks.at(-1).code.includes('c#4'));
+ await page.click('#undo');await settle();await page.click('#undo');await settle();
+ assert.equal((await state()).project.tracks.at(-1).code,originalCode);
  const before=(await saved()).tracks.map(t=>t.code);
  await page.reload();await page.click('#audio');await page.waitForFunction(()=>document.querySelector('#audio').textContent.includes('enabled'));
  assert.deepEqual((await state()).project.tracks.map(t=>t.code),before);
+ assert.equal(await page.inputValue('#scale-type'),'major');assert.equal(await page.inputValue('#scale-root'),'7');
  // Failed compilation must not change the canonical source.
  await page.fill('#track-code','$: broken(');await page.click('#run-code');await settle();
  assert.deepEqual((await state()).project.tracks.map(t=>t.code),before);

@@ -1,6 +1,8 @@
 import {DRUMS,SYNTH_KEYS,SOUNDS,isDrum,noteName,mod} from './core.js';
 import {createProject,createTrack,restoreProject,tempoBpm,tempoCode,inputValue,projectCode} from './project.js';
-import {assertEditable,cleanCode,withVolume,eventSignature} from './clean-code.js';
+import {assertEditable,cleanCode,withVolume,equivalentEvents} from './clean-code.js';
+import {ROOTS,SCALES,inScale} from './scales.js';
+import {shareURL,projectFromHash} from './share.js';
 import {stripTempo} from './code-scope.js';
 import * as live from './live-strudel.js';
 import {AudioEngine} from './audio.js';
@@ -12,12 +14,24 @@ let project=createProject(),selected=project.tracks[0].id,ready=false,running=fa
 let octave=4,grid=.25,selection=null,gesture=null,only=null,lastLoop=-1,recorded=[],takeBefore=null;
 const views=new Map(),drafts=new Map(),history=[],held=new Map();
 let rollFocus='';
+let editError='';
+let sharedPending=false,sharedSession=false,trustRequest=null;
+let scaleRoot=0,scale='off';
+try{const saved=JSON.parse(localStorage.getItem('live-strudel-scale'));if(saved&&Object.hasOwn(SCALES,saved.scale)&&Number.isInteger(saved.root)&&saved.root>=0&&saved.root<12){scaleRoot=saved.root;scale=saved.scale;}}catch{}
+const outsideScale=pitch=>typeof pitch==='number'&&!inScale(pitch,scaleRoot,scale);
 const track=()=>project.tracks.find(t=>t.id===selected);
 const beats=()=>project.bars*4;
 const currentNotes=()=>views.get(selected)||[];
 const options=()=>({metronome:$('metro').checked,only});
 try{const saved=localStorage.getItem('keylab-project');if(saved)project=restoreProject(JSON.parse(saved));selected=project.tracks[0]?.id;}catch{status('Could not restore the saved project. Open a saved file to recover it.');}
-function persist(){localStorage.setItem('keylab-project',JSON.stringify(project));}
+function persist(){localStorage.setItem(sharedSession?'keylab-shared-project':'keylab-project',JSON.stringify(project));}
+async function trustShared(){
+ if(!sharedPending)return true;
+ if(!trustRequest)trustRequest=new Promise(resolve=>{
+  const dialog=$('trust-dialog');dialog.showModal();dialog.onclose=()=>{const accepted=dialog.returnValue==='trust';if(accepted)sharedPending=false;trustRequest=null;resolve(accepted);};
+ });
+ return trustRequest;
+}
 function saveUndo(value=JSON.stringify(project)){history.push(value);if(history.length>80)history.shift();$('undo').disabled=false;}
 function mapping(){
  const t=track();if(!t)return [];
@@ -53,23 +67,28 @@ function render(){
  <div class="track-controls"><button data-action="mute" class="${t.mute?'on':''}" aria-label="Mute track ${i+1}" aria-pressed="${t.mute}" title="Silence this track">Mute</button><button data-action="solo" class="${t.solo?'on':''}" aria-label="Solo track ${i+1}" aria-pressed="${t.solo}" title="Play only soloed tracks">Solo</button><button data-action="delete" class="danger" aria-label="Delete track ${i+1}">Delete</button></div>
  <label class="track-volume">Volume <input data-volume="${t.id}" aria-label="Track ${i+1} volume" type="range" min="0" max="1" step=".01" value="${trackVolume(t)}"><output>${Math.round(trackVolume(t)*100)}%</output></label></div>`).join('');
  $('record').disabled=!t||busy;$('play').disabled=!t||busy;
+ $('play').textContent=running?'■ Stop music':'▶ Play music';$('play').setAttribute('aria-label',running?'Stop music':'Play music');
+ $('play-hint').textContent=running?(only?'Playing selected track':'Playing all tracks'):(sharedPending?'Shared project loaded. Press Play music to review and start.':'Press Play music to hear your tracks.');
+ $('share').disabled=busy||recording;
  for(const id of ['bpm','bars','add-track','load'])$(id).disabled=busy||recording;
  if(t){
   $('editor-title').textContent=t.name;$('sound').value=t.instrument;$('volume').value=trackVolume(t);
   $('octave').textContent=octave;$('octave-control').style.display=isDrum(t.instrument)?'none':'flex';
+  $('scale-controls').hidden=isDrum(t.instrument);$('scale-root').value=scaleRoot;$('scale-type').value=scale;$('scale-root').disabled=scale==='off';
   $('delete-note').disabled=!selection||busy||recording;$('clear').disabled=!currentNotes().length||busy||recording;
   $('quantize').disabled=busy||recording;$('run-code').disabled=busy||recording;$('simplify-code').disabled=busy||recording;
   const code=drafts.get(t.id)??t.code;if($('track-code').value!==code)$('track-code').value=code;
   $('code-state').textContent=drafts.has(t.id)?'Unapplied changes':'Strudel → note view';
   renderRoll();renderKeys();
  }
- $('code').value=projectCode(project);$('export-meta').textContent=tempoBpm(project)+' BPM';
+ try{$('code').value=projectCode(project);}catch{$('code').value=project.tempo+'\n\n'+project.tracks.map(t=>t.code).join('\n\n');}
+ $('export-meta').textContent=tempoBpm(project)+' BPM';
  renderOverview();
 }
 function renderKeys(){
  $('keys').className='keys'+(isDrum(track().instrument)?'':' synth');
- $('keys').innerHTML=mapping().map(({key,pitch,label})=>`<button class="pad ${typeof pitch==='number'&&[1,3,6,8,10].includes(pitch%12)?'black':''}" data-key="${key}" aria-label="${label}, key ${key.toUpperCase()}"><b>${key.toUpperCase()}</b><span>${label}</span></button>`).join('');
- $('keyboard-help').textContent=isDrum(track().instrument)?'Use the labeled keys or click a pad.':'Hold notes · Z / X: octave';
+ $('keys').innerHTML=mapping().map(({key,pitch,label})=>`<button class="pad ${outsideScale(pitch)?'out-of-scale':''} ${typeof pitch==='number'&&[1,3,6,8,10].includes(pitch%12)?'black':''}" data-key="${key}" aria-label="${label}, key ${key.toUpperCase()}${outsideScale(pitch)?', outside selected scale':''}"><b>${key.toUpperCase()}</b><span>${label}</span></button>`).join('');
+ $('keyboard-help').textContent=isDrum(track().instrument)?'Use the labeled keys or click a pad.':'Hold notes · Z / X: octave'+(scale!=='off'?' · Gray notes are outside the scale (still playable)':'');
  for(const key of held.keys())document.querySelector(`[data-key="${key}"]`)?.classList.add('active');
 }
 function rowsForTrack(){
@@ -85,9 +104,10 @@ function renderRoll(){
  const notes=currentNotes();
  $('roll').style.setProperty('--steps',beats()/grid);$('roll').style.setProperty('--beats',beats());$('roll').style.setProperty('--track-color',track().color);
  $('ruler').innerHTML=Array.from({length:beats()},(_,i)=>`<span>${Math.floor(i/4)+1}.${i%4+1}</span>`).join('');
- $('lanes').innerHTML=rowsForTrack().map(row=>`<div class="lane"><div class="lane-label"><kbd>${escape(row.key.toUpperCase())}</kbd>${escape(row.label)}</div><div class="lane-grid" data-pitch="${escape(row.pitch)}" aria-label="${escape(row.label)} note lane">${notes.filter(n=>String(n.pitch)===String(row.pitch)).map(n=>`<button class="note ${selection===n.id?'selected-note':''}" data-note="${n.id}" style="left:${n.start/beats()*100}%;width:${Math.max(.6,Math.min(n.pitched?n.duration:.16,beats()-n.start)/beats()*100)}%" aria-label="${escape(row.label)} at beat ${(n.start+1).toFixed(3)}" title="${n.pitched?'Drag to move · Drag right edge to resize':'Drag to move'}">${n.pitched?'<span class="note-resize" title="Drag to change note length" aria-hidden="true"></span>':''}</button>`).join('')}</div></div>`).join('');
+ $('lanes').innerHTML=rowsForTrack().map(row=>`<div class="lane ${outsideScale(row.pitch)?'out-of-scale':''}"><div class="lane-label"><kbd>${escape(row.key.toUpperCase())}</kbd>${escape(row.label)}</div><div class="lane-grid" data-pitch="${escape(row.pitch)}" aria-label="${escape(row.label)} note lane">${notes.filter(n=>String(n.pitch)===String(row.pitch)).map(n=>`<button class="note ${selection===n.id?'selected-note':''}" data-note="${n.id}" style="left:${n.start/beats()*100}%;width:${Math.max(.6,Math.min(n.pitched?n.duration:.16,beats()-n.start)/beats()*100)}%" aria-label="${escape(row.label)} at beat ${(n.start+1).toFixed(3)}" title="${n.pitched?'Drag to move · Drag right edge to resize':'Drag to move'}">${n.pitched?'<span class="note-resize" title="Drag to change note length" aria-hidden="true"></span>':''}</button>`).join('')}</div></div>`).join('');
  $('note-count').textContent=notes.length+' notes';
- $('note-detail').textContent='Drag note to move · Drag right edge to resize · Delete to remove';
+ $('note-detail').textContent=editError||'Drag note to move · Drag right edge to resize · Delete to remove';
+ $('note-detail').classList.toggle('edit-error',!!editError);
  const focus=selected+':'+[...new Set(notes.map(n=>n.pitch))].sort().join(',');
  if(focus!==rollFocus){
   rollFocus=focus;
@@ -102,6 +122,7 @@ function renderOverview(){
  }).join('')||'<p class="small">Add a track to see its timeline.</p>';
 }
 async function enable(){
+ if(!await trustShared())return false;
  if(ready)return true;
  $('audio').disabled=true;$('audio').textContent='Loading…';
  try{const {context,manifest}=await live.initialize();await monitor.init(manifest,context);await live.prepare(project);refreshViews();ready=true;$('audio').textContent='Audio enabled ✓';render();return true;}
@@ -124,8 +145,8 @@ async function commitCode(t,code,{before=JSON.stringify(project),undo=true}={}){
  refreshViews();persist();render();
 }
 async function transaction(action){
- if(busy)return;busy=true;document.body.dataset.busy='true';
- try{await action();}catch(e){status(e.message);$('code-state').textContent=e.message;}
+ if(busy)return;busy=true;editError='';document.body.dataset.busy='true';
+ try{if(await trustShared())await action();}catch(e){editError=e.message;status(e.message);$('code-state').textContent=e.message;}
  finally{busy=false;render();}
 }
 async function editNotes(remove,add){
@@ -140,7 +161,7 @@ async function verifiedCode(events){
  const code=cleanCode(events,project.bars),{pattern}=await live.compile(code);
  const projected=live.eventsForPattern(pattern,project.bars);
  // Compare normalized pitch identities as well as every supported effect.
- if(eventSignature(events)!==eventSignature(projected))throw Error('This edit cannot be represented accurately yet. Your Strudel is unchanged.');
+ if(!equivalentEvents(events,projected))throw Error('This edit cannot be represented accurately yet. Your Strudel is unchanged.');
  return code;
 }
 $('simplify-code').onclick=()=>transaction(async()=>{
@@ -159,13 +180,13 @@ async function start(rec=false,target=null){
   releaseAll();only=target;recorded=[];takeBefore=rec?JSON.stringify(project):null;
   await live.start(project,{...options(),countIn:rec&&$('countin').checked});
   running=true;recording=rec;lastLoop=-1;
-  $('play').textContent='Ⅱ';$('record').classList.toggle('active',rec);$('record').textContent=rec?'Stop recording':'● Record';
+  $('record').classList.toggle('active',rec);$('record').textContent=rec?'Stop recording':'● Record';
   $('playhead').style.display='block';status(rec?'Recording…':'Playing Strudel.');
  });
 }
 async function stop(){
  releaseAll();const wasRecording=recording;running=false;recording=false;only=null;live.stop();monitor.stopAll();
- $('play').textContent='▶';$('record').classList.remove('active');$('record').textContent='● Record';$('playhead').style.display='none';$('position').textContent='1.1.1';
+ $('record').classList.remove('active');$('record').textContent='● Record';$('playhead').style.display='none';$('position').textContent='1.1.1';
  document.querySelectorAll('#beats i').forEach(el=>el.classList.remove('lit'));
  document.querySelectorAll('.arrangement-playhead').forEach(el=>el.style.display='none');
  if(wasRecording&&recorded.length){
@@ -214,6 +235,10 @@ function animate(){
  requestAnimationFrame(animate);
 }
 const soundOptions=Object.entries(SOUNDS).map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
+$('scale-root').innerHTML=ROOTS.map((name,i)=>`<option value="${i}">${name}</option>`).join('');
+$('scale-type').innerHTML=Object.entries(SCALES).map(([value,s])=>`<option value="${value}">${s.label}</option>`).join('');
+function changeScale(){scaleRoot=Number($('scale-root').value);scale=$('scale-type').value;localStorage.setItem('live-strudel-scale',JSON.stringify({root:scaleRoot,scale}));render();}
+$('scale-root').onchange=changeScale;$('scale-type').onchange=changeScale;
 $('sound').innerHTML=soundOptions;$('new-sound').innerHTML=soundOptions;
 $('audio').onclick=enable;$('play').onclick=()=>start();$('record').onclick=()=>start(true);$('stop').onclick=()=>stop();$('stop-code').onclick=()=>stop();$('undo').onclick=undo;
 $('add-track').onclick=()=>{if(project.tracks.length>=32){status('Maximum 32 tracks.');return;}$('track-dialog').showModal();};
@@ -295,7 +320,7 @@ $('lanes').onpointerdown=e=>{
  const lane=e.target.closest('.lane-grid');if(!lane)return;
  const rect=lane.getBoundingClientRect(),button=e.target.closest('[data-note]');
  if(button){
-  const n=currentNotes().find(n=>n.id===button.dataset.note);selection=n.id;gesture={note:n,x:e.clientX,rect,resize:n.pitched&&(e.altKey||!!e.target.closest('.note-resize')),moved:false};
+  const n=currentNotes().find(n=>n.id===button.dataset.note);selection=n.id;gesture={note:n,x:e.clientX,y:e.clientY,rect,resize:n.pitched&&(e.altKey||!!e.target.closest('.note-resize')),moved:false};
   e.preventDefault();button.setPointerCapture(e.pointerId);$('delete-note').disabled=false;button.classList.add('selected-note');
  }else{
   const pitch=lane.dataset.pitch,n=currentNotes().find(n=>String(n.pitch)===pitch)||currentNotes()[0];
@@ -305,13 +330,17 @@ $('lanes').onpointerdown=e=>{
  }
 };
 $('lanes').onpointermove=e=>{
- if(!gesture||Math.abs(e.clientX-gesture.x)<3&&!gesture.moved)return;
+ if(!gesture||Math.abs(e.clientX-gesture.x)<3&&(gesture.resize||Math.abs(e.clientY-gesture.y)<3)&&!gesture.moved)return;
  gesture.moved=true;const delta=(e.clientX-gesture.x)/gesture.rect.width*beats(),n={...gesture.note};
  if(gesture.resize)n.duration=Math.min(beats()-n.start,Math.max(grid,Math.round((n.duration+delta)/grid)*grid));
- else n.start=Math.max(0,Math.min(beats()-grid,Math.round((n.start+delta)/grid)*grid));
+ else {
+  n.start=Math.max(0,Math.min(beats()-grid,Math.round((n.start+delta)/grid)*grid));
+  const target=[...document.querySelectorAll('.lane-grid')].find(lane=>{const r=lane.getBoundingClientRect();return e.clientY>=r.top&&e.clientY<r.bottom;});
+  if(target){n.pitch=n.pitched?Number(target.dataset.pitch):target.dataset.pitch;n.value={...n.value,...(n.pitched?{note:n.pitch}:{s:n.pitch})};gesture.rowOffset=target.getBoundingClientRect().top-gesture.rect.top;}
+ }
  $('note-detail').textContent=gesture.resize?'Length: '+Number(n.duration.toFixed(3))+' beats · release to apply':'Drag to move · release to apply';
  gesture.updated=n;const el=document.querySelector(`[data-note="${n.id}"]`);
- if(el){el.style.left=n.start/beats()*100+'%';if(n.pitched)el.style.width=Math.min(n.duration,beats()-n.start)/beats()*100+'%';}
+ if(el){el.style.left=n.start/beats()*100+'%';el.style.transform='translateY('+(gesture.rowOffset||0)+'px)';el.style.zIndex='4';if(n.pitched)el.style.width=Math.min(n.duration,beats()-n.start)/beats()*100+'%';}
 };
 $('lanes').onpointerup=()=>{if(!gesture)return;const g=gesture;gesture=null;if(g.moved)editNotes([g.note],[g.updated]);else renderRoll();};
 $('lanes').onpointercancel=()=>{gesture=null;renderRoll();};
@@ -320,14 +349,30 @@ $('view-all').onclick=()=>{const open=$('overview').hidden;$('overview').hidden=
 $('arrangement').onclick=e=>{const el=e.target.closest('[data-arrange]');if(el&&!recording){selected=el.dataset.arrange;selection=null;render();}};
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText(projectCode(project));status('Project code copied.');}catch{$('code').focus();$('code').select();}};
 $('save').onclick=()=>{const blob=new Blob([JSON.stringify(project,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='live-strudel.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+$('share').onclick=async()=>{
+ if(drafts.size){status('Run your code changes before sharing.');return;}
+ try{const url=await shareURL(project,location.href);$('share-url').value=url;$('share-dialog').showModal();$('share-url').select();
+  try{await navigator.clipboard.writeText(url);$('share-feedback').textContent='Link copied.';}catch{$('share-feedback').textContent='Copy the link below.';}
+ }catch(e){status(e.message);}
+};
+$('copy-share').onclick=async()=>{try{await navigator.clipboard.writeText($('share-url').value);$('share-feedback').textContent='Link copied.';}catch{$('share-url').focus();$('share-url').select();$('share-feedback').textContent='Press ⌘C / Ctrl+C to copy.';}};
 $('load').onclick=()=>$('file').click();
 $('file').onchange=e=>transaction(async()=>{
  const file=e.target.files[0];if(!file)return;if(file.size>10*1024*1024)throw Error('Project file exceeds 10 MB.');
  const next=restoreProject(JSON.parse(await file.text()));await stop();await live.prepare(next);saveUndo();project=next;selected=project.tracks[0]?.id;drafts.clear();refreshViews();persist();e.target.value='';
 });
 document.addEventListener('strudel.log',e=>{if(e.detail?.message?.includes('error:'))status(e.detail.message);});
-render();animate();
-live.prepare(project).then(()=>{refreshViews();render();}).catch(e=>status('Pattern: '+e.message));
+async function bootstrap(){
+ busy=true;render();
+ try{
+  const shared=await projectFromHash(location.hash);
+  if(shared){project=shared;selected=project.tracks[0]?.id;sharedPending=true;sharedSession=true;status('Shared project loaded. Review the code, then press Play music.');}
+  else {await live.prepare(project);refreshViews();}
+ }catch(e){status(e.message);}
+ finally{busy=false;render();}
+}
+bootstrap();animate();
+window.addEventListener('hashchange',()=>{if(location.hash.startsWith('#project='))location.reload();});
 // Compile saved code only when the user enables audio or runs a track.
 const context=document.modelContext;
 if(context?.registerTool)context.registerTool({name:'read_keylab_project',description:'Read canonical Strudel tracks and their derived note view.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute(input){

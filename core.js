@@ -4,6 +4,7 @@ export const SOUNDS = {'909':'Roland TR-909', acoustic:'Acoustic drums', sawtoot
 export const COLORS = ['#8b9dff','#c4a2ed','#7fb8d4','#d6a3b6','#91b8ac','#b2b6ca'];
 export const isDrum = sound => sound === '909' || sound === 'acoustic';
 export const noteName = midi => ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'][midi % 12] + (Math.floor(midi / 12) - 1);
+export const strudelNote = midi => Number.isInteger(midi)?['c','c#','d','d#','e','f','f#','g','g#','a','a#','b'][mod(midi,12)]+(Math.floor(midi/12)-1):midi;
 export const mod = (n,m) => ((n%m)+m)%m;
 export function newTrack(sound='909', index=0) { return {id:crypto.randomUUID(), sound, name:SOUNDS[sound], volume:.8, mute:false, solo:false, color:COLORS[index%COLORS.length], notes:[]}; }
 export function quantizeNotes(notes, grid, beats) {
@@ -42,6 +43,42 @@ export function gridPattern(notes,beats,drum){
  if(!drum)code+='.legato('+fmt(notes[0].duration/step)+')';
  return code;
 }
+// Express note lengths with mini-notation weights, not an extra legato control.
+export function melodyPattern(notes,beats){
+ let span=beats,list=[...notes].sort((a,b)=>a.start-b.start||a.pitch-b.pitch);
+ for(let candidate=4;candidate<beats;candidate+=4){
+  if(beats%candidate)continue;
+  const first=list.filter(n=>n.start<candidate);
+  if(first.length*(beats/candidate)!==list.length)continue;
+  const signature=ns=>ns.map(n=>[Number(n.start.toFixed(7)),n.pitch,Number(n.duration.toFixed(7))].join(':')).sort().join('|');
+  if(Array.from({length:beats/candidate},(_,i)=>signature(list.filter(n=>n.start>=i*candidate&&n.start<(i+1)*candidate).map(n=>({...n,start:n.start-i*candidate})))).every(s=>s===signature(first))){span=candidate;list=first;break;}
+ }
+ const step=[4,2,1,.5,1/3,.25,1/6,.125,1/12,.0625,1/24,1/48].find(step=>
+  Math.abs(span/step-Math.round(span/step))<1e-7&&list.every(n=>[n.start,n.duration].every(v=>Math.abs(v/step-Math.round(v/step))<1e-7)));
+ if(!step||list.some(n=>n.start+n.duration>span+1e-7))return null;
+ const chords=[];
+ for(const n of list){
+  const chord=chords.find(c=>Math.abs(c.start-n.start)<1e-7&&Math.abs(c.duration-n.duration)<1e-7&&!c.pitches.includes(n.pitch));
+  if(chord)chord.pitches.push(n.pitch);else chords.push({start:n.start,duration:n.duration,pitches:[n.pitch]});
+ }
+ const voices=[];
+ for(const chord of chords){
+  let voice=voices.find(v=>v.at(-1).start+v.at(-1).duration<=chord.start+1e-7);
+  if(!voice){voice=[];voices.push(voice);}voice.push(chord);
+ }
+ const patterns=voices.map(voice=>{
+  const tokens=[];let cursor=0;
+  const push=(token,duration)=>{const weight=Math.round(duration/step);if(weight>0)tokens.push(token+(weight===1?'':'@'+weight));};
+  for(const chord of voice){
+   push('~',chord.start-cursor);
+   const names=chord.pitches.map(strudelNote);
+   push(names.length===1?names[0]:'['+names.join(',')+']',chord.duration);cursor=chord.start+chord.duration;
+  }
+  push('~',span-cursor);
+  return 'note('+JSON.stringify(compactSteps(tokens))+')'+(span===4?'':'.slow('+fmt(span/4)+')');
+ });
+ return patterns.length===1?patterns[0]:'stack('+patterns.join(', ')+')';
+}
 export function exportStrudel(project) {
  const beats=project.bars*4;
  const active=audibleTracks(project.tracks).filter(t=>t.notes.length);
@@ -55,24 +92,24 @@ export function exportTrack(t,bars=2) {
   const beats=bars*4;
   const drum=isDrum(t.sound),groups=new Map();
   for(const n of [...t.notes].sort((a,b)=>a.start-b.start)){
-   const key=drum?n.pitch:n.duration;
+   const key=drum?n.pitch:'melody';
    if(!groups.has(key))groups.set(key,[]);
    groups.get(key).push(n);
   }
   const voices=[];
   for(const notes of groups.values()){
-   const compact=gridPattern(notes,beats,drum);
+   const compact=drum?gridPattern(notes,beats,true):melodyPattern(notes,beats);
    if(compact){voices.push(compact);continue;}
    for(const n of notes){
     const duration=Math.min(n.duration,beats),rest=beats-duration;
-    let code=drum?'s('+JSON.stringify(n.pitch)+')':'note('+n.pitch+').legato(1)';
+    let code=drum?'s('+JSON.stringify(n.pitch)+')':'note('+JSON.stringify(strudelNote(n.pitch))+')';
     if(rest>0)code='timecat(['+fmt(duration)+', '+code+'], ['+fmt(rest)+', silence])';
     voices.push(code+'.slow('+bars+').late('+fmt(n.start/4)+')');
    }
   }
   let code=voices.length===1?voices[0]:'stack(\n    '+voices.join(',\n    ')+'\n  )';
   if(drum)code+='.bank('+JSON.stringify(t.sound==='909'?'RolandTR909':'BossDR660')+')';
-  else code+='.s('+JSON.stringify(t.sound==='supersaw'?'sawtooth':t.sound)+').attack(0.008).sustain(0.65).release(0.12)';
+  else code+='.s('+JSON.stringify(t.sound==='supersaw'?'sawtooth':t.sound)+')';
   if(t.sound==='supersaw')code+='.layer(x => x.detune(-12), x => x, x => x.detune(12))';
   return code+'.gain('+fmt(t.volume)+')';
 }

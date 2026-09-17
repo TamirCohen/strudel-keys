@@ -26,7 +26,7 @@ export function restoreProject(input){
 }
 export function inputValue(instrument,pitch,volume=.8){
  return isDrum(instrument)?{s:pitch,bank:instrument==='909'?'RolandTR909':'BossDR660',gain:volume}:
- {note:pitch,s:instrument==='supersaw'?'sawtooth':instrument,gain:volume,attack:.008,sustain:.65,release:.12};
+ {note:pitch,s:instrument==='supersaw'?'sawtooth':instrument,gain:volume};
 }
 export function projectCode(project){
  const solo=project.tracks.some(t=>t.solo);

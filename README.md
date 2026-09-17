@@ -4,7 +4,11 @@ A browser-based Strudel workspace with live code, recording, a piano roll, and a
 
 ## Run locally
 
-Requires Node.js 22.15 or newer. Run `npm ci`, then `npm run dev` and open the printed local URL. Click **Audio** to enable playback. Drum samples require internet access. Projects autosave in this browser; **Save** downloads a portable JSON backup.
+Requires Node.js 22.15 or newer. Run `npm ci`, then `npm run dev` and open the printed local URL. Drum samples require internet access. Projects autosave in this browser; **Save** downloads a portable JSON backup.
+
+Press **Play music** to enable audio and start all tracks in one step. **Enable keyboard** is only for playing pads without starting the transport. **Run track** applies and auditions the selected track.
+
+**Share** copies a compressed, versioned URL containing the tracks, Strudel code, tempo, loop length, mute, and solo settings. No upload or account is needed; anyone with the link can open a copy. It is a snapshot, so later edits require a new link. Large projects should use Save instead. Incoming shared code is displayed without execution until the recipient explicitly trusts it. Shared-session autosave is separate from the recipient's existing project.
 
 ## One musical source
 
@@ -18,10 +22,14 @@ Each track has its own code scope. For example, `$: s("bd*4, [~ cp]*2").bank("Ro
 
 The per-track volume sliders write a `postgain(...)` transform into Strudel. Mute and Solo select which track patterns enter the mix and export. **All tracks** shows colored, stacked timelines; click one to select its editor.
 
+Melodies use named notes (`c3`, `f#4`) rather than MIDI numbers. Held lengths use mini-notation weights such as `c3@2`, without generated legato calls. Exact off-grid timings still need timecat/slow/late. New notes do not add attack, sustain, or release controls; explicit envelope settings already in your code remain intact.
+
+For synth tracks, **Scale** and **Root** provide an optional visual guide. Off is the default. Notes outside the selected scale are gray in the keyboard and piano roll, but remain playable and editable. The guide never changes Strudel, pitches, or recordings. Your guide preference is remembered locally, separate from musical project state.
+
 ## Editing and recording
 
 - **Add track** opens a sound picker. Mute, Solo, and Delete use full labels.
-- Click an empty note lane to add a note; drag to move; drag its right-edge handle to make a pitched note longer or shorter (Alt-drag also works).
+- Click an empty note lane to add a note; drag horizontally to change timing and vertically to change pitch; drag its right-edge handle to make a pitched note longer or shorter (Alt-drag also works). If a custom pattern cannot be rewritten safely, the reason appears beside the note editor instead of silently snapping back.
 - Select a note and use **Delete note**, Delete, Backspace, or right-click. **Clear** clears the selected track; **Remove all** removes every track.
 - Cmd/Ctrl+Z undoes project edits and recorded takes. In the code textarea it uses normal text undo; the Undo button always acts on the project.
 - Drum keys: A S D F G H J K. Synth keys: A W S E D F T G Y H U J K. Z/X changes octave. Physical key positions work across keyboard languages.
@@ -38,7 +46,7 @@ Note rewriting supports a conservative subset of static native patterns and cont
 
 ## Checks
 
-Run `npm test` and `npm run build`. For browser regression tests, install Chromium with `npx playwright install chromium`, leave the dev server running, then run `node tests/browser.mjs`.
+Run `npm test` and `npm run build`. For browser regression tests, install Chromium with `npx playwright install chromium`, leave the dev server running, then run `node tests/browser.mjs` and `node tests/share-browser.mjs`.
 
 Tests cover canonical state and legacy migration, repeated-pattern export, note/effect editing, undo, recording, non-English keyboard input, volume/code synchronization, shared metronome timing, clap identity during playback, persistence, and narrow-screen layout.
 

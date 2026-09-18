@@ -39,6 +39,22 @@ try{
  s=await state();assert.equal(s.views[s.project.tracks[0].id].length,7);
  assert.ok(s.project.tracks[0].code.includes('.lpf(1200)'));assert.ok(s.project.tracks[0].code.includes('.room(0.2)'));assert.ok(!s.project.tracks[0].code.includes('filterHaps'));
  await page.keyboard.press('Meta+z');await settle();assert.equal(await page.locator('.note').count(),8);
+ // Shift-click toggles selection; deleting the batch is one undoable edit.
+ const batchSource=(await state()).project.tracks[0].code;
+ await page.locator('.note').nth(0).click();
+ await page.locator('.note').nth(1).click({modifiers:['Shift']});
+ await page.locator('.note').nth(2).click({modifiers:['Shift']});
+ assert.equal(await page.locator('.selected-note').count(),3);
+ assert.equal(await page.textContent('#delete-note'),'Delete 3 notes');
+ await page.locator('.note').nth(1).click({modifiers:['Shift']});assert.equal(await page.locator('.selected-note').count(),2);
+ await page.keyboard.press('Backspace');await settle();assert.equal(await page.locator('.note').count(),6);
+ await page.keyboard.press('Meta+z');await settle();assert.equal(await page.locator('.note').count(),8);
+ assert.equal((await state()).project.tracks[0].code,batchSource);
+ await page.locator('.note').nth(0).click({modifiers:['Shift']});await page.locator('.note').nth(1).click({modifiers:['Shift']});
+ await page.click('#delete-note');await settle();assert.equal(await page.locator('.note').count(),6);
+ await page.keyboard.press('Meta+z');await settle();assert.equal(await page.locator('.note').count(),8);
+ await page.locator('.note').nth(0).click();await page.locator('.note').nth(1).click({modifiers:['Shift']});
+ await page.keyboard.press('Escape');assert.equal(await page.locator('.selected-note').count(),0);
  // Scale is a visual guide, not a musical transform or input restriction.
  assert.equal(await page.inputValue('#scale-type'),'off');assert.equal(await page.locator('.pad.out-of-scale').count(),0);
  const beforeScale=(await state()).project.tracks[0].code;

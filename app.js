@@ -11,8 +11,8 @@ const $=id=>document.getElementById(id),monitor=new AudioEngine();
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const status=text=>$('status').textContent=text;
 let project=createProject(),selected=project.tracks[0].id,ready=false,running=false,recording=false,busy=false;
-let octave=4,grid=.25,selection=null,gesture=null,only=null,lastLoop=-1,recorded=[],takeBefore=null;
-const views=new Map(),drafts=new Map(),history=[],held=new Map();
+let octave=4,grid=.25,gesture=null,only=null,lastLoop=-1,recorded=[],takeBefore=null;
+const views=new Map(),drafts=new Map(),history=[],held=new Map(),selection=new Set();
 let rollFocus='';
 let editError='';
 let sharedPending=false,sharedSession=false;
@@ -34,7 +34,9 @@ function mapping(){
 }
 function refreshViews(begin=0){
  for(const t of project.tracks){try{
-  const notes=live.projectTrack(t.id,project.bars,begin);views.set(t.id,notes);
+  const notes=live.projectTrack(t.id,project.bars,begin);
+  if(t.id===selected&&JSON.stringify(views.get(t.id))!==JSON.stringify(notes))selection.clear();
+  views.set(t.id,notes);
   const first=notes[0];
   if(first){
    const bank=String(first.value.bank||'').toLowerCase(),sound=first.value.s;
@@ -69,7 +71,7 @@ function render(){
   $('editor-title').textContent=t.name;$('sound').value=t.instrument;$('volume').value=trackVolume(t);
   $('octave').textContent=octave;$('octave-control').style.display=isDrum(t.instrument)?'none':'flex';
   $('scale-controls').hidden=isDrum(t.instrument);$('scale-type').value=scaleName(scaleRoot,scale);
-  $('delete-note').disabled=!selection||busy||recording;$('clear').disabled=!currentNotes().length||busy||recording;
+  $('delete-note').disabled=!selection.size||busy||recording;$('clear').disabled=!currentNotes().length||busy||recording;
   $('quantize').disabled=busy||recording;$('run-code').disabled=busy||recording;$('simplify-code').disabled=busy||recording;
   const code=drafts.get(t.id)??t.code;if($('track-code').value!==code)$('track-code').value=code;
   $('code-state').textContent=drafts.has(t.id)?'Unapplied changes':'Strudel → note view';
@@ -93,14 +95,22 @@ function rowsForTrack(){
  if(!isDrum(track().instrument))list.sort((a,b)=>Number(b.pitch)-Number(a.pitch));
  return list;
 }
+function updateSelection(){
+ const ids=new Set(currentNotes().map(n=>n.id));
+ for(const id of selection)if(!ids.has(id))selection.delete(id);
+ document.querySelectorAll('[data-note]').forEach(el=>{const chosen=selection.has(el.dataset.note);el.classList.toggle('selected-note',chosen);el.setAttribute('aria-pressed',String(chosen));});
+ $('delete-note').disabled=!selection.size||busy||recording;
+ $('delete-note').textContent=selection.size>1?'Delete '+selection.size+' notes':'Delete note';
+}
 function renderRoll(){
  if(!track())return;
  const notes=currentNotes();
  $('roll').style.setProperty('--steps',beats()/grid);$('roll').style.setProperty('--beats',beats());$('roll').style.setProperty('--track-color',track().color);
  $('ruler').innerHTML=Array.from({length:beats()},(_,i)=>`<span>${Math.floor(i/4)+1}.${i%4+1}</span>`).join('');
- $('lanes').innerHTML=rowsForTrack().map(row=>`<div class="lane ${outsideScale(row.pitch)?'out-of-scale':''}"><div class="lane-label"><kbd>${escape(row.key.toUpperCase())}</kbd>${escape(row.label)}</div><div class="lane-grid" data-pitch="${escape(row.pitch)}" aria-label="${escape(row.label)} note lane">${notes.filter(n=>String(n.pitch)===String(row.pitch)).map(n=>`<button class="note ${selection===n.id?'selected-note':''}" data-note="${n.id}" style="left:${n.start/beats()*100}%;width:${Math.max(.6,Math.min(n.pitched?n.duration:.16,beats()-n.start)/beats()*100)}%" aria-label="${escape(row.label)} at beat ${(n.start+1).toFixed(3)}" title="${n.pitched?'Drag to move · Drag right edge to resize':'Drag to move'}">${n.pitched?'<span class="note-resize" title="Drag to change note length" aria-hidden="true"></span>':''}</button>`).join('')}</div></div>`).join('');
+ $('lanes').innerHTML=rowsForTrack().map(row=>`<div class="lane ${outsideScale(row.pitch)?'out-of-scale':''}"><div class="lane-label"><kbd>${escape(row.key.toUpperCase())}</kbd>${escape(row.label)}</div><div class="lane-grid" data-pitch="${escape(row.pitch)}" aria-label="${escape(row.label)} note lane">${notes.filter(n=>String(n.pitch)===String(row.pitch)).map(n=>`<button class="note ${selection.has(n.id)?'selected-note':''}" data-note="${n.id}" style="left:${n.start/beats()*100}%;width:${Math.max(.6,Math.min(n.pitched?n.duration:.16,beats()-n.start)/beats()*100)}%" aria-label="${escape(row.label)} at beat ${(n.start+1).toFixed(3)}" title="${n.pitched?'Drag to move · Drag right edge to resize':'Drag to move'}">${n.pitched?'<span class="note-resize" title="Drag to change note length" aria-hidden="true"></span>':''}</button>`).join('')}</div></div>`).join('');
  $('note-count').textContent=notes.length+' notes';
- $('note-detail').textContent=editError||'Drag note to move · Drag right edge to resize · Delete to remove';
+ updateSelection();
+ $('note-detail').textContent=editError||'Shift-click to select multiple · Delete to remove · Drag edge to resize';
  $('note-detail').classList.toggle('edit-error',!!editError);
  const focus=selected+':'+[...new Set(notes.map(n=>n.pitch))].sort().join(',');
  if(focus!==rollFocus){
@@ -138,7 +148,7 @@ async function commitCode(t,code,{before=JSON.stringify(project),undo=true}={}){
  if(undo)saveUndo(before);
  t.code=normalized||'$: silence';
  if(result.tempo!==undefined)project.tempo=tempoCode(result.tempo*4);
- live.remember(t.id,t.code,result.pattern);drafts.delete(t.id);selection=null;
+ live.remember(t.id,t.code,result.pattern);drafts.delete(t.id);selection.clear();
  if(running)await live.update(project,options());
  refreshViews();persist();render();
 }
@@ -255,7 +265,7 @@ $('tracks').onclick=e=>{
  const el=e.target.closest('[data-track]');if(!el)return;
  const t=project.tracks.find(t=>t.id===el.dataset.track),action=e.target.dataset.action;
  if(recording){status('Stop recording before changing tracks.');return;}
- if(!action){releaseAll();selected=t.id;selection=null;render();return;}
+ if(!action){releaseAll();selected=t.id;selection.clear();render();return;}
  transaction(async()=>{
   saveUndo();
   if(action==='delete'){if(running)await stop();project.tracks=project.tracks.filter(x=>x.id!==t.id);if(selected===t.id)selected=project.tracks[0]?.id;}
@@ -287,11 +297,11 @@ $('sound').onchange=e=>transaction(async()=>{
  await commitCode(t,t.code+'\nall(p => '+transform+')',{before});t.instrument=instrument;t.name=SOUNDS[instrument];persist();
 });
 $('bpm').onchange=e=>transaction(async()=>{const bpm=Number(e.target.value);if(bpm<40||bpm>240||!Number.isFinite(bpm))return;saveUndo();project.tempo=tempoCode(bpm);if(running)await live.update(project,options());persist();});
-$('bars').onchange=e=>{saveUndo();project.bars=Number(e.target.value);selection=null;refreshViews();persist();render();};
+$('bars').onchange=e=>{saveUndo();project.bars=Number(e.target.value);selection.clear();refreshViews();persist();render();};
 $('grid').onchange=e=>{grid=Number(e.target.value);renderRoll();e.target.blur();};
 $('metro').onchange=()=>{if(running)live.update(project,options()).catch(e=>status(e.message));};
 $('clear').onclick=()=>transaction(()=>commitCode(track(),'$: silence'));
-$('delete-note').onclick=()=>{const n=currentNotes().find(n=>n.id===selection);if(n)editNotes([n],[]);};
+$('delete-note').onclick=()=>{const notes=currentNotes().filter(n=>selection.has(n.id));if(notes.length)editNotes(notes,[]);};
 $('quantize').onclick=()=>{
  const notes=currentNotes();
  editNotes(notes,notes.map(n=>({...n,start:mod(Math.round(n.start/grid)*grid,beats()),duration:Math.min(beats(),Math.max(grid,Math.round(n.duration/grid)*grid))})));
@@ -306,7 +316,8 @@ window.addEventListener('keydown',e=>{
  const key=physicalKey(e);
  if((e.metaKey||e.ctrlKey)&&key==='z'&&!e.shiftKey){e.preventDefault();if(!e.repeat)undo();return;}
  if(e.metaKey||e.ctrlKey||e.altKey||e.repeat)return;
- if(['Delete','Backspace'].includes(e.key)&&selection){e.preventDefault();$('delete-note').click();return;}
+ if(e.key==='Escape'){selection.clear();updateSelection();return;}
+ if(['Delete','Backspace'].includes(e.key)&&selection.size){e.preventDefault();$('delete-note').click();return;}
  if(e.code==='Space'){e.preventDefault();start();return;}
  if(e.shiftKey&&key==='r'){e.preventDefault();start(true);return;}
  if(!track())return;
@@ -322,9 +333,12 @@ $('lanes').onpointerdown=e=>{
  const lane=e.target.closest('.lane-grid');if(!lane)return;
  const rect=lane.getBoundingClientRect(),button=e.target.closest('[data-note]');
  if(button){
-  const n=currentNotes().find(n=>n.id===button.dataset.note);selection=n.id;gesture={note:n,x:e.clientX,y:e.clientY,rect,resize:n.pitched&&(e.altKey||!!e.target.closest('.note-resize')),moved:false};
+  const n=currentNotes().find(n=>n.id===button.dataset.note);
+  if(e.shiftKey){e.preventDefault();button.focus({preventScroll:true});if(selection.has(n.id))selection.delete(n.id);else selection.add(n.id);updateSelection();return;}
+  selection.clear();selection.add(n.id);updateSelection();gesture={note:n,x:e.clientX,y:e.clientY,rect,resize:n.pitched&&(e.altKey||!!e.target.closest('.note-resize')),moved:false};
   e.preventDefault();button.setPointerCapture(e.pointerId);$('delete-note').disabled=false;button.classList.add('selected-note');
  }else{
+  if(e.shiftKey)return;
   const pitch=lane.dataset.pitch,n=currentNotes().find(n=>String(n.pitch)===pitch)||currentNotes()[0];
   const value=n?{...n.value,...(isDrum(track().instrument)?{s:pitch}:{note:Number(pitch)})}:inputValue(track().instrument,isDrum(track().instrument)?pitch:Number(pitch));
   const start=Math.max(0,Math.min(beats()-grid,Math.round((e.clientX-rect.left)/rect.width*beats()/grid)*grid));
@@ -348,7 +362,7 @@ $('lanes').onpointerup=()=>{if(!gesture)return;const g=gesture;gesture=null;if(g
 $('lanes').onpointercancel=()=>{gesture=null;renderRoll();};
 $('lanes').oncontextmenu=e=>{const el=e.target.closest('[data-note]');if(!el)return;e.preventDefault();const n=currentNotes().find(n=>n.id===el.dataset.note);if(n)editNotes([n],[]);};
 $('view-all').onclick=()=>{const open=$('overview').hidden;$('overview').hidden=!open;$('view-all').setAttribute('aria-pressed',String(open));renderOverview();};
-$('arrangement').onclick=e=>{const el=e.target.closest('[data-arrange]');if(el&&!recording){selected=el.dataset.arrange;selection=null;render();}};
+$('arrangement').onclick=e=>{const el=e.target.closest('[data-arrange]');if(el&&!recording){selected=el.dataset.arrange;selection.clear();render();}};
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText(projectCode(project));status('Project code copied.');}catch{$('code').focus();$('code').select();}};
 $('share').onclick=async()=>{
  if(drafts.size){status('Run your code changes before sharing.');return;}

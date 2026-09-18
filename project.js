@@ -1,6 +1,5 @@
 import {newTrack as legacyTrack,exportTrack,validateProject,COLORS,SOUNDS,isDrum} from './core.js';
-import {scopeCode} from './code-scope.js';
-import {simpleExpression} from './clean-code.js';
+import {readableExpression} from './export-code.js';
 export const tempoBpm=p=>Number(/^setcpm\(([\d.]+)\)$/.exec(p.tempo)?.[1])*4;
 export const tempoCode=bpm=>'setcpm('+Number((bpm/4).toFixed(8))+')';
 export function createTrack(instrument='909',index=0){
@@ -30,7 +29,5 @@ export function inputValue(instrument,pitch,volume=.8){
 }
 export function projectCode(project){
  const solo=project.tracks.some(t=>t.solo);
- // Each track has its own REPL scope for all()/each(), so preserve that in a
- // portable expression with the same Strudel transforms.
- return project.tempo+'\n\n'+project.tracks.filter(t=>!t.mute&&(!solo||t.solo)).map(t=>'$: '+(simpleExpression(t.code)||scopeCode(t.code))).join('\n\n');
+ return project.tempo+'\n\n'+project.tracks.filter(t=>!t.mute&&(!solo||t.solo)).map(t=>'$: '+readableExpression(t.code)).join('\n\n');
 }

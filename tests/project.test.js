@@ -25,7 +25,7 @@ test('MIDI edits rewrite compact code and retain effects without edit history',(
 test('track scopes isolate all transforms and tempo comes from project source',()=>{
  const a=createTrack(),b=createTrack('sawtooth'),p={...createProject(),tracks:[a,b]};
  a.code+='\nall(p=>p.postgain(.2))';
- const out=projectCode(p);assert.equal(out.split('const _klParts=').length,2);
+ const out=projectCode(p);assert.ok(!out.includes('_kl'));assert.ok(out.includes('.postgain(.2)'));
  assert.equal(stripTempo('setcpm(120/4)\n$: s("bd")'),'$: s("bd")');
  assert.ok(scopeCode('const x=note("c3");\n$: x\nall(p=>p.room(.2))').includes('_klParts.push(x)'));
  assert.equal(tempoCode(90),'setcpm(22.5)');

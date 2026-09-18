@@ -1,6 +1,6 @@
 import {DRUMS,SYNTH_KEYS,SOUNDS,isDrum,noteName,mod} from './core.js';
 import {createProject,createTrack,restoreProject,tempoBpm,tempoCode,inputValue,projectCode} from './project.js';
-import {assertEditable,cleanCode,withVolume,equivalentEvents} from './clean-code.js';
+import {assertEditable,cleanCode,withVolume,withControl,equivalentEvents} from './clean-code.js';
 import {ROOTS,SCALES,inScale,scaleName,parseScaleName} from './scales.js';
 import {shareURL,projectFromHash} from './share.js';
 import {stripTempo} from './code-scope.js';
@@ -77,8 +77,8 @@ function render(){
   $('code-state').textContent=drafts.has(t.id)?'Unapplied changes':'Strudel → note view';
   renderRoll();renderKeys();
  }
- try{$('code').value=projectCode(project);}catch{$('code').value=project.tempo+'\n\n'+project.tracks.map(t=>t.code).join('\n\n');}
- $('export-meta').textContent=tempoBpm(project)+' BPM';
+ try{$('code').value=projectCode(project);$('copy').disabled=false;$('export-meta').textContent=tempoBpm(project)+' BPM';}
+ catch(e){$('code').value=e.message;$('copy').disabled=true;$('export-meta').textContent='Use Share for custom JavaScript';}
  renderOverview();
 }
 function renderKeys(){
@@ -292,9 +292,10 @@ $('run-code').onclick=runCode;
 $('track-code').onkeydown=e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();runCode();}};
 $('sound').onchange=e=>transaction(async()=>{
  const t=track(),instrument=e.target.value,before=JSON.stringify(project);
- const transform=isDrum(instrument)?'p.bank("'+(instrument==='909'?'RolandTR909':'BossDR660')+'")':'p.s("'+(instrument==='supersaw'?'sawtooth':instrument)+'")';
+ const control=isDrum(instrument)?'bank':'s',value=isDrum(instrument)?(instrument==='909'?'RolandTR909':'BossDR660'):(instrument==='supersaw'?'sawtooth':instrument);
  if(currentNotes().length&&isDrum(instrument)!==isDrum(t.instrument)){status('Add a new track to switch between drums and pitched notes.');return;}
- await commitCode(t,t.code+'\nall(p => '+transform+')',{before});t.instrument=instrument;t.name=SOUNDS[instrument];persist();
+ const code=withControl(t.code,control,value);
+ await commitCode(t,code,{before});t.instrument=instrument;t.name=SOUNDS[instrument];persist();
 });
 $('bpm').onchange=e=>transaction(async()=>{const bpm=Number(e.target.value);if(bpm<40||bpm>240||!Number.isFinite(bpm))return;saveUndo();project.tempo=tempoCode(bpm);if(running)await live.update(project,options());persist();});
 $('bars').onchange=e=>{saveUndo();project.bars=Number(e.target.value);selection.clear();refreshViews();persist();render();};
@@ -387,5 +388,6 @@ window.addEventListener('hashchange',()=>{if(location.hash.startsWith('#project=
 const context=document.modelContext;
 if(context?.registerTool)context.registerTool({name:'read_keylab_project',description:'Read canonical Strudel tracks and their derived note view.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute(input){
  if(!input||typeof input!=='object'||Object.keys(input).length)throw Error('Expected an empty object.');
- return {project:JSON.parse(JSON.stringify(project)),views:Object.fromEntries(views),transport:live.diagnostics(),strudel:projectCode(project)};
+ let strudel=null;try{strudel=projectCode(project);}catch{}
+ return {project:JSON.parse(JSON.stringify(project)),views:Object.fromEntries(views),transport:live.diagnostics(),strudel};
 }});

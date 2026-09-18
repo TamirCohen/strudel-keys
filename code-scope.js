@@ -1,7 +1,7 @@
 import {parse} from 'acorn';
 const ast=code=>parse(code,{ecmaVersion:2022,allowAwaitOutsideFunction:true});
-// Give every track its own labels and all()/each() transforms. This same
-// expression is used by the runtime and by the portable project export.
+// Runtime-only isolation for each track's labels and all()/each() transforms.
+// Never use this implementation wrapper for user-facing project export.
 export function scopeCode(code,withTempo=false){
  const program=ast(code);
  const body=program.body.map(node=>{

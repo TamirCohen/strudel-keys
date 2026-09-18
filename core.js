@@ -30,6 +30,7 @@ function compactSteps(tokens) {
  return tokens.join(' ');
 }
 export function gridPattern(notes,beats,drum){
+ if(!drum)return melodyPattern(notes,beats);
  const step=[1,.5,1/3,.25,1/6,.125,1/12,.0625].find(step=>
   notes.every(n=>Math.abs(n.start/step-Math.round(n.start/step))<1e-7));
  if(!step)return null;
@@ -47,7 +48,6 @@ export function gridPattern(notes,beats,drum){
  }
  let code=(drum?'s':'note')+'('+JSON.stringify(compactSteps(tokens))+')';
  if(span!==4)code+='.slow('+fmt(span/4)+')';
- if(!drum)code+='.legato('+fmt(notes[0].duration/step)+')';
  return code;
 }
 // Express note lengths with mini-notation weights, not an extra legato control.

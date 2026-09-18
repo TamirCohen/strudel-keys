@@ -1,5 +1,6 @@
 import {parse} from 'acorn';
 import {gridPattern,melodyPattern,strudelNote,noteMidi} from './core.js';
+import {readableExpression} from './export-code.js';
 
 const fmt=n=>String(Number(n.toFixed(8)));
 const quote=JSON.stringify;
@@ -185,7 +186,10 @@ export function rewriteNotes(code,events,{remove=[],add=[]},bars){
  const ids=new Set(remove.map(n=>n.id));
  return cleanCode([...events.filter(n=>!ids.has(n.id)),...add],bars);
 }
-export function withVolume(code,value){
+export function withControl(code,control,value){
+ if(!['postgain','bank','s'].includes(control))throw Error('Unsupported track control.');
+ const argument=typeof value==='number'?fmt(value):quote(value);
+ try{code='$: '+readableExpression(code);}catch{/* Keep custom source intact; one explicit local transform is necessary. */}
  const program=ast(code);
  if(program.body.length===1){
   const statement=program.body[0],node=statement.type==='LabeledStatement'?statement.body.expression:statement.expression;
@@ -193,23 +197,20 @@ export function withVolume(code,value){
    function withoutVolume(n){
     if(n.type==='CallExpression'&&n.callee.type==='MemberExpression'&&!n.callee.computed){
      const base=withoutVolume(n.callee.object);
-     if(n.callee.property.name==='postgain')return base;
+     if(n.callee.property.name===control)return base;
      return base+code.slice(n.callee.object.end,n.end);
     }
     const source=code.slice(n.start,n.end);
     return ['CallExpression','Identifier'].includes(n.type)?source:'('+source+')';
    }
-   return '$: '+withoutVolume(node)+'.postgain('+fmt(value)+')';
+   return '$: '+withoutVolume(node)+'.'+control+'('+argument+')';
   }
  }
- return code.replace(/\n*\/\/ Track volume\s+all\(p => p\.postgain\([\d.]+\)\);?\s*$/,'').trim()+'\n\n// Track volume\nall(p => p.postgain('+fmt(value)+'))';
+ const marker=control==='postgain'?'Track volume':'Track sound';
+ const suffix=new RegExp('\\n*// '+marker+'\\s+all\\(p => p\\.(?:postgain|bank|s)\\([^\\n]*\\)\\);?\\s*$');
+ return code.replace(suffix,'').trim()+'\n\n// '+marker+'\nall(p => p.'+control+'('+argument+'))';
 }
-export function simpleExpression(code){
- const program=ast(code);
- if(program.body.length!==1)return null;
- const statement=program.body[0],node=statement.type==='LabeledStatement'?statement.body.expression:statement.expression;
- return node?code.slice(node.start,node.end):null;
-}
+export const withVolume=(code,value)=>withControl(code,'postgain',value);
 export function eventSignature(events){
  return events.map(n=>{
   const value={...n.value};

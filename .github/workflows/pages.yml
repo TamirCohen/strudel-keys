@@ -1,4 +1,4 @@
-name: Deploy Keylab to GitHub Pages
+name: Deploy Live Strudel to GitHub Pages
 on:
   push:
     branches: [main]
@@ -26,6 +26,14 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Browser regressions against production build
+        run: |
+          npm run preview -- --port 4173 &
+          PREVIEW_PID=$!
+          trap 'kill "$PREVIEW_PID"' EXIT
+          for attempt in $(seq 1 30); do curl --fail --silent http://127.0.0.1:4173/ > /dev/null && break; sleep 1; done
+          TEST_URL=http://127.0.0.1:4173/ npm run test:browser
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

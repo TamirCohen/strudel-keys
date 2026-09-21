@@ -7,18 +7,19 @@ async function readLimited(stream){
 }
 export async function shareURL(project,base){
  const bytes=new TextEncoder().encode(JSON.stringify(restoreProject(project)));
- if(bytes.length>MAX_BYTES)throw Error('Project is too large for a share link. Shorten the project or copy its code from Project Strudel.');
+ if(bytes.length>MAX_BYTES)throw Error('Document is too large for a share link. Use Copy Strudel instead.');
  const compressed=await readLimited(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip')));
  let binary='';for(const byte of compressed)binary+=String.fromCharCode(byte);
- const url=new URL(base);url.search='';url.hash='project=v1.'+btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
- if(url.href.length>MAX_URL)throw Error('Project is too large for a share link. Shorten the project or copy its code from Project Strudel.');
+ const url=new URL(base);url.search='';url.hash='document=v1.'+btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+ if(url.href.length>MAX_URL)throw Error('Document is too large for a share link. Use Copy Strudel instead.');
  return url.href;
 }
 export async function projectFromHash(hash){
- if(!hash.startsWith('#project='))return null;
- if(hash.length>MAX_URL||!/^#project=v1\.[A-Za-z0-9_-]+$/.test(hash))throw Error('Invalid or unsupported share link.');
+ if(hash.startsWith('#project='))throw Error('Old project links are no longer supported. Paste the Strudel document instead.');
+ if(!hash.startsWith('#document='))return null;
+ if(hash.length>MAX_URL||!/^#document=v1\.[A-Za-z0-9_-]+$/.test(hash))throw Error('Invalid or unsupported share link.');
  try{
-  const binary=atob(hash.slice('#project=v1.'.length).replace(/-/g,'+').replace(/_/g,'/'));
+  const binary=atob(hash.slice('#document=v1.'.length).replace(/-/g,'+').replace(/_/g,'/'));
   const bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));
   const decoded=await readLimited(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')));
   return restoreProject(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(decoded)));

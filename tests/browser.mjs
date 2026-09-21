@@ -1,185 +1,234 @@
 import {chromium} from '@playwright/test';
 import assert from 'node:assert/strict';
+import {shareURL} from '../share.js';
 const browser=await chromium.launch({headless:true});
 const page=await browser.newPage({viewport:{width:1440,height:1100}});
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
-await page.addInitScript(()=>{window.registeredTools={};Object.defineProperty(document,'modelContext',{value:{registerTool:t=>{window.registeredTools[t.name]=t;}}});});
-const state=()=>page.evaluate(()=>window.registeredTools.read_keylab_project.execute({}));
-const saved=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('keylab-project')));
+const base=process.env.TEST_URL||'http://127.0.0.1:5173/';
 const settle=()=>page.waitForFunction(()=>document.body.dataset.busy==='false');
-async function apply(code){
- await page.fill('#track-code',code);await page.click('#run-code');
- await page.waitForFunction(()=>document.querySelector('#status').textContent==='Playing Strudel.'||document.querySelector('#status').textContent==='Track code applied.');
- await settle();
+const code=async()=> (await page.frameLocator('iframe').locator('.cm-line').allTextContents()).join('\n');
+async function document(code,play=false){
+ await page.frameLocator('iframe').locator('.cm-content').fill(code);await page.waitForTimeout(450);await settle();
+ await page.locator(play?'#play':'#apply').click();await settle();
+ assert.equal(await page.locator('#document-state').evaluate(e=>e.classList.contains('error')),false,await page.locator('#document-state').textContent());
 }
+const frame=()=>page.frames().find(f=>f.url().includes('player.html'));
 try{
- await page.goto('http://127.0.0.1:5173');
- await page.keyboard.down('a');await page.waitForFunction(()=>document.body.dataset.audioReady==='true',null,{timeout:60000});await page.keyboard.up('a');
- await apply('$: s("bd*4").bank("RolandTR909")');
- await page.waitForTimeout(650);
- let s=await state();
- assert.equal(s.project.version,2);assert.ok(s.project.tracks.every(t=>typeof t.code==='string'&&!('notes' in t)));
- assert.equal(s.views[s.project.tracks[0].id].length,8);
- assert.equal(s.transport.schedulerCount,1);
- const clicks=s.transport.triggers.filter(t=>t.metronome),music=s.transport.triggers.filter(t=>!t.metronome);
- assert.ok(clicks.length>=2&&music.length>=2);
- for(const hit of music){const click=clicks.find(c=>Math.abs(c.cycle-hit.cycle)<1e-8);assert.ok(click);assert.ok(Math.abs(click.time-hit.time)<1e-8);}
- assert.ok(Math.abs(clicks[1].time-clicks[0].time-.5)<1e-7);
- await page.click('#stop');
- // Change tempo through code. It becomes the one global tempo source.
- await apply('setcpm(45)\n$: s("bd*4").bank("RolandTR909")');
- await page.waitForTimeout(600);s=await state();
- assert.equal(s.project.tempo,'setcpm(45)');assert.equal(s.transport.bpm,180);
- assert.ok(!s.project.tracks[0].code.includes('setcpm'));
- const faster=s.transport.triggers.filter(t=>t.metronome);assert.ok(Math.abs(faster[1].time-faster[0].time-1/3)<1e-7);
- await page.click('#stop');
- // Edit existing source notes directly; no bake mode, no effect loss.
- await apply('$: note("c3 e3 g3 b3").s("sawtooth").lpf(1200).room(.2)');
- await page.click('#stop');await page.locator('.note').first().click();await page.click('#delete-note');await settle();
- s=await state();assert.equal(s.views[s.project.tracks[0].id].length,7);
- assert.ok(s.project.tracks[0].code.includes('.lpf(1200)'));assert.ok(s.project.tracks[0].code.includes('.room(0.2)'));assert.ok(!s.project.tracks[0].code.includes('filterHaps'));
- await page.keyboard.press('Meta+z');await settle();assert.equal(await page.locator('.note').count(),8);
- // Shift-click toggles selection; deleting the batch is one undoable edit.
- const batchSource=(await state()).project.tracks[0].code;
- await page.locator('.note').nth(0).click();
- await page.locator('.note').nth(1).click({modifiers:['Shift']});
- await page.locator('.note').nth(2).click({modifiers:['Shift']});
- assert.equal(await page.locator('.selected-note').count(),3);
- assert.equal(await page.textContent('#delete-note'),'Delete 3 notes');
- await page.locator('.note').nth(1).click({modifiers:['Shift']});assert.equal(await page.locator('.selected-note').count(),2);
- await page.keyboard.press('Backspace');await settle();assert.equal(await page.locator('.note').count(),6);
- await page.keyboard.press('Meta+z');await settle();assert.equal(await page.locator('.note').count(),8);
- assert.equal((await state()).project.tracks[0].code,batchSource);
- await page.locator('.note').nth(0).click({modifiers:['Shift']});await page.locator('.note').nth(1).click({modifiers:['Shift']});
- await page.click('#delete-note');await settle();assert.equal(await page.locator('.note').count(),6);
- await page.keyboard.press('Meta+z');await settle();assert.equal(await page.locator('.note').count(),8);
- await page.locator('.note').nth(0).click();await page.locator('.note').nth(1).click({modifiers:['Shift']});
- await page.keyboard.press('Escape');assert.equal(await page.locator('.selected-note').count(),0);
- // Scale is a visual guide, not a musical transform or input restriction.
- assert.equal(await page.inputValue('#scale-type'),'off');assert.equal(await page.locator('.pad.out-of-scale').count(),0);
- const beforeScale=(await state()).project.tracks[0].code;
- await page.selectOption('#scale-type','C:major');
- assert.equal(await page.locator('.pad.out-of-scale').count(),5);
- assert.ok(await page.locator('[data-key="w"]').evaluate(el=>el.classList.contains('out-of-scale')));
- assert.ok(await page.locator('.lane.out-of-scale').count()>0);
- await page.keyboard.down('w');
- assert.ok(await page.locator('[data-key="w"]').evaluate(el=>el.classList.contains('active')));
- await page.keyboard.up('w');
- await page.selectOption('#scale-type','G:major');
- await page.locator('[data-key="f"]').click();
- await page.keyboard.down('a');assert.ok(await page.locator('[data-key="a"]').evaluate(el=>el.classList.contains('active')));await page.keyboard.up('a');
- assert.ok(await page.locator('[data-key="f"]').evaluate(el=>el.classList.contains('out-of-scale')));
- assert.ok(await page.locator('[data-key="t"]').evaluate(el=>!el.classList.contains('out-of-scale')));
- assert.equal((await state()).project.tracks[0].code,beforeScale);
- const scaleMismatches=await page.evaluate(async()=>{
-  const {SCALES,scaleName,inScale}=await import('/scales.js'),live=await import('/live-strudel.js');const failures=[];
-  for(let root=0;root<12;root++)for(const [scale,{steps}]of Object.entries(SCALES)){
-   if(scale==='off')continue;
-   const name=scaleName(root,scale),{pattern}=await live.compile('$: n("'+steps.map((_,i)=>i).join(' ')+'").scale("'+name+'")');
-   const pitches=live.eventsForPattern(pattern,1).map(n=>((n.pitch%12)+12)%12).sort((a,b)=>a-b);
-   const expected=Array.from({length:12},(_,i)=>i).filter(p=>inScale(p,root,scale));
-   if(JSON.stringify(pitches)!==JSON.stringify(expected))failures.push({name,pitches,expected});
-  }
-  return failures;
+ await page.goto(base);await page.waitForSelector('.note');
+ assert.equal(await page.locator('iframe').getAttribute('sandbox'),'allow-scripts');
+ assert.equal(await frame().evaluate(()=>{try{return parent.localStorage.length}catch(e){return e.name}}),'SecurityError');
+ assert.equal(await page.locator('#document-state').textContent(),'Unapplied · Press Play music to hear this document.');
+ assert.equal(await frame().evaluate(()=>!!getIsStarted()),false);
+ await page.locator('#play').click();await settle();
+ assert.equal(await page.locator('.arr-note').count(),4);
+ assert.equal(await frame().evaluate(()=>getAudioContext().state),'running');
+ assert.ok((await frame().evaluate(()=>getCps()))>0);
+ console.log('PASS isolated native playback and initial no-execution');
+
+ await page.locator('#stop').click();await page.waitForFunction(()=>document.body.dataset.running==='false');
+ await document('$: note("~").s("sine")\nbass: note("c2").s("sine")');
+ await page.locator('[data-rename="0"]').click();
+ await page.locator('#pattern-name').fill('bass');await page.locator('#rename-form button[value="rename"]').click();await settle();
+ assert.match(await page.locator('#rename-error').textContent(),/already/);
+ await page.locator('#pattern-name').fill('melody');await page.locator('#rename-form button[value="rename"]').click();await settle();
+ assert.ok((await code()).startsWith('melody:'));
+ assert.match(await page.locator('.pattern-title').first().textContent(),/^melody/);
+ await frame().evaluate(()=>{
+  globalThis.previewTriggers=0;
+  const sound=getSound('sine'),original=sound.onTrigger;
+  sound.onTrigger=(...args)=>{globalThis.previewTriggers++;return original(...args);};
  });
- assert.deepEqual(scaleMismatches,[]);
- await page.selectOption('#scale-type','off');assert.equal(await page.locator('.pad.out-of-scale').count(),0);
- await page.selectOption('#scale-type','C:major');
- // Volume is a code control, not an independent mixer state.
- await page.locator('[data-volume]').first().fill('0.35');await page.locator('[data-volume]').first().dispatchEvent('change');await settle();
- s=await state();assert.ok(s.project.tracks[0].code.includes('postgain(0.35)'));assert.ok(s.views[s.project.tracks[0].id].every(n=>n.value.postgain===.35));
- await page.locator('.lane-grid[data-pitch="72"]').click({position:{x:120,y:10}});await settle();
- s=await state();assert.equal(s.views[s.project.tracks[0].id].length,9);assert.ok(s.views[s.project.tracks[0].id].every(n=>n.value.postgain===.35));
- await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();
- // Sound picker and all-track view.
- await page.click('#add-track');await page.selectOption('#new-sound','909');await page.click('#create-track');await settle();
- assert.equal(await page.locator('.track').count(),2);assert.equal(await page.locator('.arrangement-row').count(),2);
- assert.equal(await page.locator('#scale-controls').isVisible(),false);
- await page.locator('[data-volume]').last().fill('0.4');await page.locator('[data-volume]').last().dispatchEvent('change');await settle();
- // Recorded take is translated into canonical code.
- await page.uncheck('#countin');await page.click('#record');await page.waitForTimeout(200);
- await page.dispatchEvent('body','keydown',{key:'ש',code:'KeyA',bubbles:true});await page.dispatchEvent('body','keyup',{key:'ש',code:'KeyA',bubbles:true});
- await page.click('#stop');await settle();s=await state();
- const recorded=s.project.tracks[1];assert.ok(!/Recorded take|JSON|keylabId/.test(recorded.code));assert.equal(s.views[recorded.id].length,1);assert.ok(!('notes' in recorded));
- assert.equal(s.views[recorded.id][0].value.postgain,.4);
- await page.keyboard.press('Meta+z');await settle();s=await state();assert.equal(s.views[s.project.tracks[1].id].length,0);
- // Clear/remove and undo preserve code.
- await page.locator('.track-select').first().click();await settle();
- await page.click('#clear');await settle();assert.equal(await page.locator('.note').count(),0);
- await page.keyboard.press('Meta+z');await settle();assert.equal(await page.locator('.note').count(),8);
- await page.click('#remove-all');await settle();assert.equal(await page.locator('.track').count(),0);
- await page.keyboard.press('Meta+z');await settle();assert.equal(await page.locator('.track').count(),2);
- // Bank expansion during audio playback must never create duplicate clap lanes.
- await page.locator('.track-select').last().click();
- await apply('$: s("cp").bank("RolandTR909")');
- for(const x of [130,250]){
-  await page.waitForTimeout(700);
-  await page.locator('.lane-grid[data-pitch="cp"]').click({position:{x,y:10}});await settle();
-  s=await state();
-  assert.ok(s.views[s.project.tracks[1].id].every(n=>n.pitch==='cp'&&n.value.s==='cp'));
-  assert.equal(await page.locator('.lane-grid[data-pitch*="Roland"]').count(),0);
+ const previewLane=page.locator('.lane[data-pitch="60"] .lane-body');
+ await previewLane.click({position:{x:20,y:12}});await settle();
+ await page.waitForFunction(()=>document.querySelectorAll('.note').length===1);
+ assert.equal(await frame().evaluate(()=>globalThis.previewTriggers),1);
+ assert.equal(await frame().evaluate(()=>!!getIsStarted()),false);
+ await page.locator('.note').first().click();await settle();
+ await frame().waitForFunction(()=>globalThis.previewTriggers===2,undefined,{polling:50});
+ assert.equal(await frame().evaluate(()=>globalThis.previewTriggers),2);
+ await page.locator('.note').first().click({modifiers:['Shift']});await settle();
+ assert.equal(await frame().evaluate(()=>globalThis.previewTriggers),2);
+ await page.locator('#play').click();await settle();
+ assert.equal(await page.locator('.arr-row').count(),2);
+ assert.match(await page.locator('.arr-row').first().textContent(),/melody/);
+ await page.locator('#add').click();await settle();
+ await page.locator('#new-name').fill('lead');await page.locator('#create').click();await settle();
+ assert.match(await code(),/lead: note\("~"\)/);
+ assert.match(await page.locator('.pattern-title').last().textContent(),/^lead/);
+ await page.locator('[data-select="0"]').first().click();await settle();
+ console.log('PASS native pattern names, duplicate validation, and click previews without starting playback');
+
+ const drumResponse=page.waitForResponse(r=>/RolandTR909\/.*\.wav/i.test(r.url()),{timeout:15000}).catch(error=>error);
+ await document('$: s("bd*4").bank("RolandTR909")\n$: s("cp*2").bank("TR808")',true);
+ assert.ok((await drumResponse).ok());
+ assert.equal(await frame().evaluate(()=>!!getSound('bd')&&!!getSound('piano')&&!!getSound('tr909_bd')&&!!getSound('rolandtr808_cp')),true);
+ assert.ok(!(await code()).includes('samples('));
+ console.log('PASS default samples, drum-bank aliases and actual TR-909 audio download without setup code');
+
+ const shared='// preserved\nconst cutoff = 900;\nsetcpm(45)\n$: note("c3 e3").s("sawtooth").lpf(cutoff)\n$: note("g3").s("sine")\nall(p=>p.gain(0.4))';
+ await document(shared,true);
+ assert.equal(await page.locator('.pattern').count(),2);
+ assert.equal(await frame().evaluate(()=>getCps()),.75);
+ const values=await frame().evaluate(()=>getPattern().queryArc(0,1).map(h=>h.value));
+ assert.equal(values.length,3);assert.ok(values.every(v=>v.gain===.4));assert.equal(values[0].cutoff,900);
+ assert.equal(await page.locator('#record').isDisabled(),true);
+ await page.locator('#volume').fill('0.3');await page.locator('#volume').dispatchEvent('change');await settle();
+ assert.ok((await code()).includes('.lpf(cutoff).postgain(0.3)'));
+ assert.ok((await code()).includes('all(p=>p.gain(0.4))'));
+ console.log('PASS whole-document shared variables, all(), tempo and source volume');
+
+ await page.locator('#metro').check();await settle();
+ assert.equal(await frame().evaluate(()=>getPattern().queryArc(0,1).length),7);
+ await page.locator('#metro').uncheck();await settle();
+ assert.equal(await frame().evaluate(()=>getPattern().queryArc(0,1).length),3);
+ assert.ok((await code()).includes('setcpm(45)'));
+
+ await page.frameLocator('iframe').locator('.cm-content').fill('setcpm(20)\n$: missingFunction()');await page.waitForTimeout(450);await settle();
+ await page.locator('#apply').click();await settle();
+ assert.ok((await page.locator('#document-state').textContent()).includes('Last applied document is still playing'));
+ assert.equal(await frame().evaluate(()=>getCps()),.75);
+ assert.equal(await frame().evaluate(()=>getPattern().queryArc(0,1).length),3);
+ console.log('PASS failed evaluation leaves playing document and tempo untouched');
+
+ await document('setcpm(60)\n$: note("c4").s("sine").cpm(30)');
+ assert.equal(await frame().evaluate(()=>Number(getPattern().queryArc(0,1)[0].whole.end)),2);
+ await document("registerSound('testtone', getSound('sine').onTrigger)\n$: note(\"c4\").s(\"testtone\")");
+ assert.equal(await frame().evaluate(()=>!!getSound('testtone')),true);
+ await page.frameLocator('iframe').locator('.cm-content').fill('$: note("c4").s("testtone")');await page.waitForTimeout(450);await settle();
+ await page.locator('#apply').click();await settle();
+ assert.ok((await page.locator('#document-state').textContent()).includes('Unknown sound'));
+ await document('$: note("c4").s("sine")');
+ assert.equal(await frame().evaluate(()=>!!getSound('testtone')),false);
+ console.log('PASS native cpm transform, metronome and document-owned sound dependencies');
+
+ await document("registerSound('testbank_cp', getSound('sine').onTrigger)\n$: s(\"cp ~\").bank(\"testbank\")",true);
+ await page.waitForTimeout(300);
+ assert.equal(await frame().evaluate(()=>getPattern().queryArc(0,1)[0].value.s),'cp');
+ const clap=page.locator('.lane[data-pitch="cp"] .lane-body');const clapRect=await clap.boundingBox();
+ await clap.click({position:{x:clapRect.width*.75,y:12}});await settle();
+ assert.equal(await page.locator('.lane[data-pitch="cp"]').count(),1);
+ assert.ok(!(await code()).includes('testbank_testbank'));assert.ok((await code()).includes('.bank("testbank")'));
+ console.log('PASS banked sound edits never duplicate the bank or move sound rows');
+
+ await document('// keep me\nsetcpm(30)\n$: note("c4 ~ e4 ~").s("sawtooth").lpf(700).slow(2)',true);
+ assert.equal(await page.locator('#record').isDisabled(),false);
+ assert.equal(await page.locator('#length').inputValue(),'2');
+ await page.locator('#stop').click();await page.waitForFunction(()=>document.body.dataset.running==='false');
+ const before=await code();
+ let note=page.locator('.note').first();await note.scrollIntoViewIfNeeded();let rect=await note.boundingBox();
+ const lane=await note.locator('..').boundingBox();
+ await page.mouse.move(rect.x+rect.width/2,rect.y+8);await page.mouse.down();await page.mouse.move(rect.x+rect.width/2+lane.width/8,rect.y+8,{steps:8});await page.mouse.up();await settle();
+ const moved=await code();assert.notEqual(moved,before);assert.ok(moved.includes('// keep me'));assert.ok(moved.endsWith('.lpf(700).slow(2)'));
+ note=page.locator('.note').first();await note.scrollIntoViewIfNeeded();rect=await note.boundingBox();
+ await page.mouse.move(rect.x+rect.width-2,rect.y+8);await page.mouse.down();await page.mouse.move(rect.x+rect.width-2+lane.width/16,rect.y+8,{steps:5});await page.mouse.up();await settle();
+ assert.notEqual(await code(),moved);
+ await page.keyboard.press('Control+z');await settle();assert.equal(await code(),moved);
+ await page.keyboard.press('Control+z');await settle();assert.equal(await code(),before);
+ await page.locator('.note').nth(0).click({modifiers:['Shift']});await page.locator('.note').nth(1).click({modifiers:['Shift']});
+ await page.locator('#delete-notes').click();await settle();assert.ok((await code()).includes('note("~")'));
+ await page.keyboard.press('Control+z');await settle();assert.equal(await code(),before);
+ console.log('PASS source-only move, resize, batch delete and unified undo');
+
+ await document('drums: s("bd*4").bank("RolandTR909")');
+ const repeatedDrums=await code();
+ await page.locator('#length').selectOption('4');await settle();
+ assert.equal(await code(),repeatedDrums);
+ assert.equal(await page.locator('.note').count(),16);
+ await page.locator('.note').nth(9).click({modifiers:['Shift']});
+ await page.locator('#delete-notes').click();await settle();
+ assert.equal(await page.locator('.note').count(),15);
+ assert.match(await code(),/\.slow\(4\)/);
+ await page.locator('#length').selectOption('1');await settle();
+ const fourCycleCode=await code();
+ assert.equal(await page.locator('.note').count(),4);
+ await page.locator('.note').first().click({modifiers:['Shift']});
+ await page.locator('#delete-notes').click();await settle();
+ await page.locator('#length').selectOption('4');await settle();
+ assert.equal(await page.locator('.note').count(),14);
+ await page.keyboard.press('Control+z');await settle();assert.equal(await code(),fourCycleCode);
+ await page.keyboard.press('Control+z');await settle();assert.equal(await code(),repeatedDrums);
+ assert.equal(await page.locator('.note').count(),16);
+
+ await document('melody: note("c4 ~@3").s("sine").lpf(700)');
+ const oneCycleCode=await code();
+ await page.locator('#length').selectOption('2');await settle();
+ assert.equal(await code(),oneCycleCode);
+ assert.equal(await page.locator('.note').count(),2);
+ assert.equal(await page.locator('.note').first().getAttribute('title'),'c4 · 0.000 → 0.250');
+ const laterLane=page.locator('.lane[data-pitch="64"] .lane-body'),laterBox=await laterLane.boundingBox();
+ await laterLane.click({position:{x:laterBox.width*.76,y:12}});await settle();
+ assert.match(await page.locator('.lane[data-pitch="64"] .note').getAttribute('title'),/1.500/);
+ const phrase=await code();
+ for(const length of ['1','4','8','2']){
+  await page.locator('#length').selectOption(length);await settle();
+  assert.equal(await page.locator('#length').inputValue(),length);
+  assert.equal(await code(),phrase);
  }
- await page.click('#stop');
- const clapCount=await page.locator('.note').count();assert.equal(clapCount,4);
- await page.locator('.note').last().click();await page.click('#delete-note');await settle();
- assert.equal(await page.locator('.note').count(),clapCount-1);
- // Old generated edit history cleans up to the original musical pattern.
- const legacy='$: s("bd*4, - cp - cp, hh*16").bank("RolandTR909")\n\n// Piano-roll edit\nall(p => stack(p, timecat([0.25, pure(JSON.parse(\'{"s":"cp","bank":"RolandTR909","keylabId":"old-edit"}\'))], [7.75, silence]).slow(2).late(1.625)))\n\n// Piano-roll edit\nall(p => p.filterHaps(h => !(h.value.keylabId===\'old-edit\')))\n\n// Track volume\nall(p => p.postgain(0.3))';
- await apply(legacy);await page.click('#stop');s=await state();const oldCount=s.views[s.project.tracks[1].id].length;
- await page.click('#simplify-code');await settle();s=await state();
- assert.equal(s.project.tracks[1].code,'$: s("bd*4, [~ cp]*2, hh*16").bank("RolandTR909").postgain(0.3)');
- assert.equal(s.views[s.project.tracks[1].id].length,oldCount);assert.ok(!s.strudel.includes('_klParts'));
- await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();assert.equal((await state()).project.tracks[1].code,legacy);
- await page.click('#simplify-code');await settle();
- // Evolving code still plays, but a destructive fixed-window rewrite is rejected.
- await apply('$: s("<bd cp>").bank("RolandTR909")');await page.click('#stop');
- const evolving=(await state()).project.tracks[1].code;
- await page.locator('.lane-grid[data-pitch="cp"]').click({position:{x:130,y:10}});await settle();
- assert.equal((await state()).project.tracks[1].code,evolving);
- assert.ok((await page.textContent('#status')).includes('cannot be safely rewritten'));
- await apply('$: s("bd*4, - cp - cp, hh*16").bank("RolandTR909").postgain(0.3)');await page.click('#stop');
- // Resize a real recorded synth note using its visible edge, without modifiers.
- await page.click('#add-track');await page.selectOption('#new-sound','sawtooth');await page.click('#create-track');await settle();
- await page.uncheck('#countin');await page.click('#record');await page.waitForTimeout(300);
- await page.dispatchEvent('body','keydown',{key:'a',code:'KeyA',bubbles:true});await page.waitForTimeout(250);
- await page.dispatchEvent('body','keyup',{key:'a',code:'KeyA',bubbles:true});await page.click('#stop');await settle();
- s=await state();const resizedId=s.project.tracks.at(-1).id,original=s.views[resizedId][0],originalCode=s.project.tracks.at(-1).code;
- assert.equal(s.views[resizedId].length,1);
- async function resizeBy(beats){
-  const handle=page.locator('.note-resize').first();await handle.scrollIntoViewIfNeeded();
-  const box=await handle.boundingBox(),lane=await page.locator('.lane-grid').first().boundingBox();
-  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
-  await page.mouse.move(box.x+box.width/2+lane.width*beats/8,box.y+box.height/2,{steps:8});await page.mouse.up();await settle();
- }
- await resizeBy(1);s=await state();const longer=s.views[resizedId][0];
- assert.ok(longer.duration>original.duration);assert.equal(longer.start,original.start);assert.equal(longer.pitch,original.pitch);
- assert.equal(s.views[resizedId].length,1);assert.notEqual(s.project.tracks.at(-1).code,originalCode);
- await resizeBy(-.5);s=await state();assert.ok(s.views[resizedId][0].duration<longer.duration);
- await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();s=await state();assert.equal(s.views[resizedId][0].duration,longer.duration);
- await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();s=await state();assert.equal(s.project.tracks.at(-1).code,originalCode);
- // Drag diagonally to change time AND pitch, then resize the moved note.
- const note=page.locator('.note').first();await note.scrollIntoViewIfNeeded();
- const noteBox=await note.boundingBox(),targetLane=await page.locator(`.lane-grid[data-pitch="${original.pitch+1}"]`).boundingBox();
- await page.mouse.move(noteBox.x+noteBox.width/3,noteBox.y+noteBox.height/2);await page.mouse.down();
- await page.mouse.move(noteBox.x+noteBox.width/3+targetLane.width/16,targetLane.y+targetLane.height/2,{steps:8});await page.mouse.up();await settle();
- s=await state();const moved=s.views[resizedId][0];
- assert.equal(moved.pitch,original.pitch+1);assert.ok(moved.start>original.start);assert.equal(s.views[resizedId].length,1);
- await resizeBy(.5);s=await state();assert.ok(s.views[resizedId][0].duration>moved.duration);
- assert.equal(s.views[resizedId][0].start,moved.start);assert.equal(s.views[resizedId][0].pitch,moved.pitch);
- assert.ok(!/legato|attack|sustain|release/.test(s.project.tracks.at(-1).code));assert.ok(s.project.tracks.at(-1).code.includes('c#4'));
- await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();await page.locator('body').click({position:{x:2,y:2}});await page.keyboard.press('Meta+z');await settle();
- assert.equal((await state()).project.tracks.at(-1).code,originalCode);
- const before=(await saved()).tracks.map(t=>t.code);
- await page.reload();await page.keyboard.down('a');await page.waitForFunction(()=>document.body.dataset.audioReady==='true',null,{timeout:60000});await page.keyboard.up('a');
- assert.deepEqual((await state()).project.tracks.map(t=>t.code),before);
- assert.equal(await page.inputValue('#scale-type'),'C:major');
- // Failed compilation must not change the canonical source.
- await page.fill('#track-code','$: broken(');await page.click('#run-code');await settle();
- assert.deepEqual((await state()).project.tracks.map(t=>t.code),before);
- await page.reload();await page.keyboard.down('a');await page.waitForFunction(()=>document.body.dataset.audioReady==='true',null,{timeout:60000});await page.keyboard.up('a');
- await page.screenshot({path:'/tmp/live-strudel-desktop.png',fullPage:true});
- await page.setViewportSize({width:390,height:844});await page.screenshot({path:'/tmp/live-strudel-mobile.png',fullPage:true});
+ await page.locator('#play').click();await settle();
+ assert.deepEqual(await frame().evaluate(()=>getPattern().queryArc(0,2).filter(h=>h.hasOnset()).map(h=>Number(h.whole.begin)).sort((a,b)=>a-b)),[0,1,1.5]);
+ await page.evaluate(()=>{globalThis.auditions=0;const send=MessagePort.prototype.postMessage;MessagePort.prototype.postMessage=function(data,...rest){if(data?.method==='audition')globalThis.auditions++;return send.call(this,data,...rest);};});
+ await laterLane.click({position:{x:laterBox.width*.9,y:12}});await settle();
+ assert.equal(await page.evaluate(()=>globalThis.auditions),0);
+ await page.locator('#stop').click();await page.waitForFunction(()=>document.body.dataset.running==='false');
+ console.log('PASS repeat-aware views, independent edits, hidden-note preservation, source undo and no previews during playback');
+
+ await document('$: note("<c3 e3>").s("sine")');
+ assert.equal(await page.locator('#clear-notes').isDisabled(),true);
+ assert.ok((await page.locator('#edit-hint').textContent()).includes('Dynamic'));
+ await document('$: stack(note("c4").s("sine"), note("e4").s("triangle"))');
+ await page.locator('#expression').selectOption('1');await settle();
+ await page.locator('#clear-notes').click();await settle();
+ assert.equal(await code(),'$: stack(note("c4").s("sine"), note("~").s("triangle"))');
+ await page.locator('#scale').fill('C:major');await page.locator('#scale').dispatchEvent('change');await settle();
+ assert.equal(await page.locator('#keys .out-of-scale').count(),5);
+ await page.locator('#keys .out-of-scale').first().click();
+ assert.equal(await page.locator('#keys button:disabled').count(),0);
+ console.log('PASS nested source selection, dynamic read-only and native scale guide');
+
+ await document('setcpm(120)\n$: note("~").s("sine")');
+ await page.locator('#countin').uncheck();await page.locator('#record').click();await settle();
+ await page.waitForFunction(()=>document.querySelector('#position').textContent!=='Count-in…');
+ await page.locator('#keys button').first().focus();await page.keyboard.down('a');await page.waitForTimeout(130);await page.keyboard.up('a');
+ await page.waitForFunction(()=>document.querySelector('#record').textContent==='● Record',{},{timeout:6000});await settle();
+ assert.ok(!(await code()).includes('note("~")'),await code());assert.ok((await code()).includes('c4'));
+ await page.locator('#stop').click();await page.waitForFunction(()=>document.body.dataset.running==='false');
+ console.log('PASS keyboard recording writes native named notes');
+
+ await document('setcpm(120)\nmelody: note("~").slow(2).s("sine")');
+ await page.locator('#record').click();await settle();
+ await page.waitForTimeout(650);
+ assert.equal(await page.locator('#record').textContent(),'■ Finish recording');
+ await page.locator('#keys button').first().focus();await page.keyboard.down('a');await page.waitForTimeout(100);await page.keyboard.up('a');
+ await page.waitForFunction(()=>document.querySelector('#record').textContent==='● Record',undefined,{timeout:6000});await settle();
+ assert.ok(await frame().evaluate(()=>getPattern().queryArc(0,2).some(h=>h.hasOnset()&&Number(h.whole.begin)>=1)));
+ await page.locator('#stop').click();await page.waitForFunction(()=>document.body.dataset.running==='false');
+ console.log('PASS recording captures notes in the second cycle');
+
+ await document('$: note("c4").s("sine")\n$: note("e4").s("sawtooth")',true);
+ const original=await code();await page.locator('[data-solo="0"]').click();await settle();assert.equal(await code(),original);
+ assert.equal(await frame().evaluate(()=>getPattern().queryArc(0,1).length),1);
+ await page.locator('[data-solo="0"]').click();await settle();assert.equal(await frame().evaluate(()=>getPattern().queryArc(0,1).length),2);
+ await page.locator('[data-mute="0"]').click();await settle();assert.ok((await code()).startsWith('_$:'));
+ assert.equal(await frame().evaluate(()=>getPattern().queryArc(0,1).length),1);
+ await page.locator('#remove-all').click();await settle();assert.equal(await page.locator('.pattern').count(),0);
+ await page.keyboard.press('Control+z');await settle();assert.equal(await page.locator('.pattern').count(),2);
+ console.log('PASS native mute, transient solo, remove all and undo');
+
+ const sharedCode='globalThis.shareExecuted = true;\n$: note("c4").s("sine")';
+ const url=await shareURL({version:3,document:sharedCode},base);
+ const recipient=await browser.newPage();await recipient.goto(url);await recipient.waitForSelector('.note');
+ const receiver=recipient.frames().find(f=>f.url().includes('player.html'));
+ assert.equal(await receiver.evaluate(()=>globalThis.shareExecuted),undefined);
+ assert.equal((await recipient.frameLocator('iframe').locator('.cm-line').allTextContents()).join('\n'),sharedCode);
+ await recipient.locator('#play').click();await recipient.waitForFunction(()=>document.body.dataset.busy==='false');
+ assert.equal(await receiver.evaluate(()=>globalThis.shareExecuted),true);
+ assert.equal(await recipient.evaluate(()=>globalThis.shareExecuted),undefined);
+ await recipient.close();
+ console.log('PASS share round trip, no autoexecution, sandbox containment');
+
+ await page.screenshot({path:'/tmp/live-strudel-rebuild-desktop.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
- assert.deepEqual(errors,[]);
- console.log('PASS: one-clock metronome/audio timing at 120 and 180 BPM, canonical code, direct note edits preserving effects, volume round-trip, recording, Hebrew keyboard, undo, track overview, persistence and mobile layout.');
+ await page.screenshot({path:'/tmp/live-strudel-rebuild-mobile.png',fullPage:true});
+ assert.deepEqual(errors,[]);console.log('PASS responsive layout and no uncaught exceptions');
 }finally{await browser.close();}
